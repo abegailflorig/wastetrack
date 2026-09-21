@@ -1,0 +1,6 @@
+import {Clock3,Trash2,UserRound} from "lucide-react";import StatusBadge from "./StatusBadge";import {Link} from "react-router";
+export type Collection={name:string;address:string;time:string;status:string;tone:"red"|"orange"|"green";collector:string;level:string};
+export default function CollectionCard({item}:{item:Collection}){
+ const route=item.status==="Priority Collection"?"full":item.status==="Scheduled"?"scheduled":"empty";
+ return <article className="rounded-xl border border-red-300 bg-[#fff8f8] p-2.5 soft-card"><div className="flex gap-2"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-red-100 text-red-600"><Trash2 size={23}/></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-2"><h3 className="text-[11px] font-bold">{item.name}</h3><StatusBadge tone={item.tone}>{item.status}</StatusBadge></div><p className="text-[7px] text-neutral-600">⌖ {item.address}</p><p className="mt-1 flex items-center gap-1 text-[7px]"><Clock3 size={8}/>{item.time}</p></div></div><div className="mt-2 flex justify-between border-t pt-1 text-[7px] text-neutral-500"><span className="flex items-center gap-1"><UserRound size={8}/>Collector: {item.collector}</span><Link to={`/calendar/details/${route}`} className="text-red-500">View details ›</Link></div></article>
+}
