@@ -30,6 +30,7 @@ import ManageResidents from "./pages/admin/ManageResidents";
 import ManageCollectors from "./pages/admin/ManageCollectors";
 import ReviewReports from "./pages/admin/ReviewReport";
 import ManageSchedules from "./pages/admin/ManageSchedules";
+<<<<<<< HEAD
 import ManageWasteStatus from "./pages/admin/ManageWasteStatus";
 import DisposalSites from "./pages/admin/DisposalSites";
 import UploadedImages from "./pages/admin/UploadedImages";
@@ -37,6 +38,8 @@ import Alerts from "./pages/admin/Alerts";
 import ManageAccount from "./pages/admin/ManageAccount";
 import WasteStatusDetails from "./pages/admin/WasteStatusDetails";
 import RegisterDisposalSite from "./pages/admin/RegisterDisposalSite";
+=======
+>>>>>>> e3d315ca13db7b1bea31382fed7c021dc25eecf1
 
 /* Waste collector pages */
 import CollectorDashboard from "./pages/collectors/CollectorDashboard";
@@ -147,12 +150,15 @@ export default function App() {
           element={<AdminDashboard />}
         />
 
+<<<<<<< HEAD
         {/* keeps the old URL working if anything still links to it */}
         <Route
           path="/admin/AdminDashboard"
           element={<Navigate to="/admin/dashboard" replace />}
         />
 
+=======
+>>>>>>> e3d315ca13db7b1bea31382fed7c021dc25eecf1
         <Route
           path="/admin/residents"
           element={<ManageResidents />}
@@ -172,6 +178,7 @@ export default function App() {
           path="/admin/schedules"
           element={<ManageSchedules />}
         />
+<<<<<<< HEAD
 
         <Route
           path="/admin/waste-status"
@@ -195,6 +202,8 @@ export default function App() {
 
         <Route path="/admin/disposal-sites/register" 
         element={<RegisterDisposalSite />} />
+=======
+>>>>>>> e3d315ca13db7b1bea31382fed7c021dc25eecf1
       </Route>
 
       {/* Waste collector routes with MobileBottomNav */}

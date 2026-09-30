@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { useState } from "react";
 import { useNavigate } from "react-router";
 
@@ -183,4 +184,8 @@ export default function AdminDashboard() {
       </div>
     </div>
   );
+=======
+export default function AdminDashboard() {
+  return <div>Admin Dashboard</div>;
+>>>>>>> e3d315ca13db7b1bea31382fed7c021dc25eecf1
 }

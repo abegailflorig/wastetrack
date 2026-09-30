@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 type CollectorStatus = "Active" | "On leave";
 
 interface Collector {
@@ -173,4 +174,8 @@ export default function ManageCollectors() {
       </div>
     </div>
   );
+=======
+export default function ManageCollectors() {
+  return <div>Manage Collectors</div>;
+>>>>>>> e3d315ca13db7b1bea31382fed7c021dc25eecf1
 }

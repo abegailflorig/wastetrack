@@ -82,7 +82,11 @@ export default function Login() {
 
       // Redirect according to the user's role.
       if (role === "admin") {
+<<<<<<< HEAD
         navigate("/admin/AdminDashboard", {
+=======
+        navigate("/admin/dashboard", {
+>>>>>>> e3d315ca13db7b1bea31382fed7c021dc25eecf1
           replace: true,
         });
 

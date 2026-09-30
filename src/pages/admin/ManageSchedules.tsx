@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 type ScheduleStatus = "Sent to collector" | "Pending — collector on leave";
 
 interface Schedule {
@@ -125,4 +126,8 @@ export default function ManageSchedules() {
       </div>
     </div>
   );
+=======
+export default function ManageSchedules() {
+  return <div>Manage Schedules</div>;
+>>>>>>> e3d315ca13db7b1bea31382fed7c021dc25eecf1
 }
