@@ -1,0 +1,5 @@
+import {ChevronLeft,ChevronRight} from "lucide-react";
+const weeks=[["","","","","","1","2"],["3","4","5","6","7","8","9"],["10","11","12","13","14","15","16"],["17","18","19","20","21","22","23"],["24","25","26","27","28","29","30"],["31","","","","","",""]];
+export default function MiniCalendar(){
+ return <div className="overflow-hidden rounded-b-lg bg-white"><div className="flex items-center justify-between px-5 py-2"><ChevronLeft size={14}/><b className="text-[10px]">August 2026</b><ChevronRight size={14}/></div><div className="grid grid-cols-7 px-2 text-center text-[8px]">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(x=><b key={x} className="py-1 font-medium">{x}</b>)}{weeks.flat().map((d,i)=><div key={i} className={`relative flex h-8 items-center justify-center ${d==="17"?"font-bold text-red-500":""}`}>{d}{["5","14","17"].includes(d)&&<i className={`absolute bottom-1 h-1 w-1 rounded-full ${d==="17"?"bg-red-500":d==="5"?"bg-amber-400":"bg-green-500"}`}/>}</div>)}</div></div>
+}
