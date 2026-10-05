@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useNavigate } from "react-router";
 
-type Tab = "Profile" | "Security" | "Notifications";
+type Tab = "Profile" | "Notifications";
 
 const css = `
 .ma-root, .ma-root * { box-sizing: border-box; }
@@ -134,7 +135,7 @@ export default function ManageAccount() {
 
       <div className="ma-body">
         <div className="ma-tabs" role="tablist" aria-label="Account settings">
-          {(["Profile", "Security", "Notifications"] as Tab[]).map((t) => (
+          {(["Profile", "Notifications"] as Tab[]).map((t) => (
             <button
               key={t}
               type="button"
@@ -149,7 +150,6 @@ export default function ManageAccount() {
         </div>
 
         {tab === "Profile" && <ProfilePanel />}
-        {tab === "Security" && <SecurityOnlyPanel />}
         {tab === "Notifications" && <NotificationsPanel />}
       </div>
     </div>
@@ -157,19 +157,21 @@ export default function ManageAccount() {
 }
 
 function ProfilePanel() {
+  const navigate = useNavigate();
+
   const [fullName, setFullName] = useState("Marco Reyes");
   const [staffId, setStaffId] = useState("");
   const [email, setEmail] = useState("");
   const [contact, setContact] = useState("");
-  const [saved, setSaved] = useState(false);
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [passwordUpdated, setPasswordUpdated] = useState(false);
 
-  const handleSave = () => {
-    // TODO: send profile fields to the backend
-    setSaved(true);
+  const handleLogout = () => {
+    // TODO: clear auth state on the backend/session if needed
+    localStorage.removeItem("userRole");
+    navigate("/login", { replace: true });
   };
 
   const handleUpdatePassword = () => {
@@ -195,23 +197,22 @@ function ProfilePanel() {
 
         <div className="ma-field">
           <label htmlFor="ma-name">Full name</label>
-          <input id="ma-name" value={fullName} onChange={(e) => { setFullName(e.target.value); setSaved(false); }} />
+          <input id="ma-name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
         </div>
         <div className="ma-field">
           <label htmlFor="ma-staff-id">Staff ID</label>
-          <input id="ma-staff-id" value={staffId} onChange={(e) => { setStaffId(e.target.value); setSaved(false); }} />
+          <input id="ma-staff-id" value={staffId} onChange={(e) => setStaffId(e.target.value)} />
         </div>
         <div className="ma-field">
           <label htmlFor="ma-email">Email address</label>
-          <input id="ma-email" type="email" value={email} onChange={(e) => { setEmail(e.target.value); setSaved(false); }} />
+          <input id="ma-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
         <div className="ma-field">
           <label htmlFor="ma-contact">Contact number</label>
-          <input id="ma-contact" type="tel" value={contact} onChange={(e) => { setContact(e.target.value); setSaved(false); }} />
+          <input id="ma-contact" type="tel" value={contact} onChange={(e) => setContact(e.target.value)} />
         </div>
 
-        <button type="button" className="ma-save" onClick={handleSave}>Save changes</button>
-        {saved && <p className="ma-confirm">Profile updated.</p>}
+        <button type="button" className="ma-save" onClick={handleLogout}>Log out</button>
       </section>
 
       <section className="ma-panel">
@@ -230,52 +231,6 @@ function ProfilePanel() {
           <label htmlFor="ma-new-pw">New password</label>
           <input
             id="ma-new-pw"
-            type="password"
-            value={newPassword}
-            onChange={(e) => { setNewPassword(e.target.value); setPasswordUpdated(false); }}
-          />
-        </div>
-
-        <button type="button" className="ma-change-photo" onClick={handleUpdatePassword}>
-          Update password
-        </button>
-        {passwordUpdated && <p className="ma-confirm">Password updated.</p>}
-      </section>
-    </div>
-  );
-}
-
-function SecurityOnlyPanel() {
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [passwordUpdated, setPasswordUpdated] = useState(false);
-
-  const handleUpdatePassword = () => {
-    if (!currentPassword || !newPassword) return;
-    // TODO: send password change to the backend
-    setPasswordUpdated(true);
-    setCurrentPassword("");
-    setNewPassword("");
-  };
-
-  return (
-    <div className="ma-panels">
-      <section className="ma-panel" style={{ gridColumn: "1 / -1", maxWidth: 420 }}>
-        <h2 className="ma-panel-title">PASSWORD &amp; SECURITY</h2>
-
-        <div className="ma-field">
-          <label htmlFor="ma-current-pw2">Current password</label>
-          <input
-            id="ma-current-pw2"
-            type="password"
-            value={currentPassword}
-            onChange={(e) => { setCurrentPassword(e.target.value); setPasswordUpdated(false); }}
-          />
-        </div>
-        <div className="ma-field">
-          <label htmlFor="ma-new-pw2">New password</label>
-          <input
-            id="ma-new-pw2"
             type="password"
             value={newPassword}
             onChange={(e) => { setNewPassword(e.target.value); setPasswordUpdated(false); }}

@@ -37,6 +37,8 @@ import Alerts from "./pages/admin/Alerts";
 import ManageAccount from "./pages/admin/ManageAccount";
 import WasteStatusDetails from "./pages/admin/WasteStatusDetails";
 import RegisterDisposalSite from "./pages/admin/RegisterDisposalSite";
+import CollectorsAccount from "./pages/admin/CollectorsAccount";
+import EditCollectorAccount from "./pages/admin/EditCollectorAccount";
 
 /* Waste collector pages */
 import CollectorDashboard from "./pages/collectors/CollectorDashboard";
@@ -207,6 +209,14 @@ export default function App() {
           path="/admin/disposal-sites/register"
           element={<RegisterDisposalSite />}
         />
+
+        <Route path="/admin/collectors/new" 
+        element={<CollectorsAccount />}
+         />
+
+         <Route path="/admin/collectors/:collectorId" 
+         element={<EditCollectorAccount />} 
+         />
       </Route>
 
       {/* Waste collector routes with MobileBottomNav */}
