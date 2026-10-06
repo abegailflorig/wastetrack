@@ -1,7 +1,14 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+import { supabase } from "../../lib/supabase.ts";
 
 type Tab = "Profile" | "Notifications";
+
+// TODO: replace with however you actually identify the signed-in user.
+// RoleLayout only stores "userRole" today — nothing identifies *which* admin is logged in.
+function getCurrentUserId(): string {
+  return localStorage.getItem("userId") ?? "unknown-user";
+}
 
 const css = `
 .ma-root, .ma-root * { box-sizing: border-box; }
@@ -58,6 +65,7 @@ const css = `
 .ma-avatar-circle {
   width: 54px; height: 54px; border-radius: 50%;
   background: #d9d9d9; flex-shrink: 0;
+  background-size: cover; background-position: center;
 }
 .ma-change-photo {
   background: #fff; border: 1.5px solid var(--red-bright); color: var(--red-bright);
@@ -66,7 +74,9 @@ const css = `
 }
 .ma-change-photo:hover { background: #fbeceb; }
 .ma-change-photo:focus-visible { outline: 2px solid var(--red-bright); outline-offset: 2px; }
+.ma-change-photo:disabled { opacity: .6; cursor: not-allowed; }
 .ma-photo-hint { margin: 4px 0 0; font-size: 10.5px; color: #777; }
+.ma-photo-error { margin: 4px 0 0; font-size: 10.5px; color: var(--red-bright); font-weight: 600; }
 
 .ma-field { margin-bottom: 14px; }
 .ma-field label { display: block; font-size: 12px; font-weight: 600; color: #444; margin-bottom: 4px; }
@@ -158,25 +168,113 @@ export default function ManageAccount() {
 
 function ProfilePanel() {
   const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const userId = getCurrentUserId();
 
   const [fullName, setFullName] = useState("Marco Reyes");
   const [staffId, setStaffId] = useState("");
   const [email, setEmail] = useState("");
   const [contact, setContact] = useState("");
 
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [passwordUpdated, setPasswordUpdated] = useState(false);
 
+  // Load the existing profile (name, avatar, etc.) on mount
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProfile() {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("avatar_url, full_name, staff_id, email, contact_number")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load profile:", error);
+        return;
+      }
+      if (data) {
+        if (data.avatar_url) setAvatarUrl(data.avatar_url);
+        if (data.full_name) setFullName(data.full_name);
+        if (data.staff_id) setStaffId(data.staff_id);
+        if (data.email) setEmail(data.email);
+        if (data.contact_number) setContact(data.contact_number);
+      }
+    }
+
+    loadProfile();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const handleChangePhotoClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+
+    setPhotoError(null);
+
+    const allowedTypes = ["image/jpeg", "image/png"];
+    if (!allowedTypes.includes(file.type)) {
+      setPhotoError("Please choose a JPG or PNG file.");
+      return;
+    }
+    const maxBytes = 2 * 1024 * 1024; // 2MB
+    if (file.size > maxBytes) {
+      setPhotoError("File is too large. Max size is 2MB.");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `${userId}/avatar.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(path, file, { upsert: true, contentType: file.type });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+        .from("avatars")
+        .getPublicUrl(path);
+
+      const publicUrl = `${publicUrlData.publicUrl}?t=${Date.now()}`; // cache-bust
+
+      const { error: dbError } = await supabase
+        .from("profiles")
+        .upsert({ id: userId, avatar_url: publicUrl, updated_at: new Date().toISOString() });
+
+      if (dbError) throw dbError;
+
+      setAvatarUrl(publicUrl);
+    } catch (err) {
+      console.error("Photo upload failed:", err);
+      setPhotoError("Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleLogout = () => {
-    // TODO: clear auth state on the backend/session if needed
     localStorage.removeItem("userRole");
     navigate("/login", { replace: true });
   };
 
   const handleUpdatePassword = () => {
     if (!currentPassword || !newPassword) return;
-    // TODO: send password change to the backend
+    // TODO: send password change to the backend (or supabase.auth.updateUser if using Supabase Auth)
     setPasswordUpdated(true);
     setCurrentPassword("");
     setNewPassword("");
@@ -188,10 +286,29 @@ function ProfilePanel() {
         <h2 className="ma-panel-title">PROFILE INFORMATION</h2>
 
         <div className="ma-avatar-row">
-          <div className="ma-avatar-circle" />
+          <div
+            className="ma-avatar-circle"
+            style={avatarUrl ? { backgroundImage: `url(${avatarUrl})` } : undefined}
+            aria-label="Profile photo"
+          />
           <div>
-            <button type="button" className="ma-change-photo">Change photo</button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png"
+              onChange={handleFileChange}
+              style={{ display: "none" }}
+            />
+            <button
+              type="button"
+              className="ma-change-photo"
+              onClick={handleChangePhotoClick}
+              disabled={uploading}
+            >
+              {uploading ? "Uploading…" : "Change photo"}
+            </button>
             <p className="ma-photo-hint">JPG or PNG, max 2MB</p>
+            {photoError && <p className="ma-photo-error">{photoError}</p>}
           </div>
         </div>
 
