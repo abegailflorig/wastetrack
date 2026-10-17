@@ -1,0 +1,44 @@
+WasteTrackComplete/
+├── src/
+│   ├── assets/
+│   │   ├── waste-logo.png
+│   │   ├── waste-bin.jpg
+│   │   ├── bin1.jpg
+│   │   ├── bin2.jpg
+│   │   ├── bin3.jpg
+│   │   └── map.jpg
+│   ├── components/
+│   │   ├── DesktopSidebar.tsx
+│   │   ├── MobileBottomNav.tsx
+│   │   ├── TopBar.tsx
+│   │   ├── SectionCard.tsx
+│   │   ├── StatusBadge.tsx
+│   │   ├── CollectionCard.tsx
+│   │   └── MiniCalendar.tsx
+│   ├── pages/
+│   │   ├── Splash.tsx
+│   │   ├── Login.tsx
+│   │   ├── Signup.tsx
+│   │   ├── Dashboard.tsx
+│   │   ├── ReportWaste.tsx
+│   │   ├── QRScanner.tsx
+│   │   ├── SiteMap.tsx
+│   │   ├── SiteDetails.tsx
+│   │   ├── CreateReport.tsx
+│   │   ├── Analyzing.tsx
+│   │   ├── ReviewSubmit.tsx
+│   │   ├── Submitted.tsx
+│   │   ├── Reports.tsx
+│   │   ├── ReviewReport.tsx
+│   │   ├── Calendar.tsx
+│   │   ├── CalendarList.tsx
+│   │   └── ScheduleDetails.tsx
+│   ├── App.tsx
+│   ├── main.tsx
+│   ├── index.css
+│   └── utils.ts
+├── package.json
+├── vite.config.ts
+├── tailwind.config.js
+├── postcss.config.js
+└── index.html

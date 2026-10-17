@@ -1,0 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+*{box-sizing:border-box}html,body,#root{min-height:100%;margin:0}body{font-family:Poppins,Inter,Arial,sans-serif;background:#d3d3d3;color:#111}
+button,input{font:inherit}.app-bg{background:linear-gradient(150deg,#ffb6b8 0%,#ff1c25 35%,#ff3039 62%,#f9e6d2 100%)}.soft-card{box-shadow:0 2px 6px rgba(0,0,0,.15)}.thin-scroll::-webkit-scrollbar{display:none}.thin-scroll{scrollbar-width:none}
+@media(min-width:900px){.desktop-shell{min-height:100vh;display:flex}.desktop-sidebar{display:flex}.desktop-main{max-width:1180px;margin:0 auto;width:100%}.mobile-bottom{display:none!important}}
+@media(max-width:899px){.desktop-sidebar{display:none}.desktop-main{width:100%}.mobile-bottom{display:flex}}
