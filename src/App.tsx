@@ -33,7 +33,6 @@ import ManageResidents from "./pages/admin/ManageResidents";
 import ManageCollectors from "./pages/admin/ManageCollectors";
 import AdminReviewReport from "./pages/admin/AdminReviewReport";
 import ManageSchedules from "./pages/admin/ManageSchedules";
-
 import ManageWasteStatus from "./pages/admin/ManageWasteStatus";
 import DisposalSites from "./pages/admin/DisposalSites";
 import UploadedImages from "./pages/admin/UploadedImages";
@@ -41,7 +40,8 @@ import Alerts from "./pages/admin/Alerts";
 import ManageAccount from "./pages/admin/ManageAccount";
 import WasteStatusDetails from "./pages/admin/WasteStatusDetails";
 import RegisterDisposalSite from "./pages/admin/RegisterDisposalSite";
-
+import EditCollectorAccount from "./pages/admin/EditCollectorAccount";
+import CollectorsAccount from "./pages/admin/CollectorsAccount";
 
 /* Waste collector pages */
 import CollectorDashboard from "./pages/collectors/CollectorDashboard";
@@ -190,6 +190,16 @@ export default function App() {
         <Route
           path="/admin/collectors"
           element={<ManageCollectors />}
+        />
+
+        <Route
+          path="/admin/collectors/new"
+          element={<CollectorsAccount />}
+        />
+
+        <Route
+          path="/admin/collectors/:collectorId"
+          element={<EditCollectorAccount />}
         />
 
         <Route

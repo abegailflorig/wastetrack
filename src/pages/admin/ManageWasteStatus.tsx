@@ -6,15 +6,30 @@ import {
   useRef,
   useState,
 } from "react";
+
 import {
   useNavigate,
   useSearchParams,
 } from "react-router";
+
+import {
+  AlertCircle,
+  ArrowUpRight,
+  ChevronRight,
+  Clock3,
+  ClipboardList,
+  Inbox,
+  LoaderCircle,
+  MapPin,
+  Search,
+  X,
+} from "lucide-react";
+
 import { supabase } from "../../lib/supabase";
 
-// ==========================================
+// ========================================
 // TYPES
-// ==========================================
+// ========================================
 
 type FillStatus =
   | "Empty"
@@ -30,39 +45,37 @@ interface Site {
   name: string;
   location: string;
   fillPercent: number | null;
-  type: string;
   lastUpdated: string | null;
   status: FillStatus;
 }
 
-type DisposalSiteRow = {
+interface DisposalSiteRow {
   site_id: string;
   site_name: string;
   location: string | null;
   is_active: boolean;
-};
+}
 
-type WasteReportRow = {
+interface WasteReportRow {
   report_id: string;
   site_id: string | null;
   cnn_detection_level: string | null;
-  waste_type: string | null;
   date_uploaded: string;
-};
+}
 
-type ScheduleRow = {
+interface ScheduleRow {
   schedule_id: string;
   site_id: string | null;
   status: string | null;
   date_completed: string | null;
-};
+}
 
-type CollectionRow = {
+interface CollectionRow {
   collection_id: string;
   schedule_id: string | null;
   collection_status: string | null;
   completed_at: string | null;
-};
+}
 
 type TableName =
   | "disposal_sites"
@@ -70,16 +83,23 @@ type TableName =
   | "schedules"
   | "collections";
 
+// ========================================
+// CONSTANTS
+// ========================================
+
+const PAGE_SIZE = 500;
+
 const FILTERS: Filter[] = [
   "All",
   "Empty",
   "Near Full",
   "Full",
+  "No report",
 ];
 
-// ==========================================
-// HELPERS
-// ==========================================
+// ========================================
+// NORMALIZE CNN WASTE LEVEL
+// ========================================
 
 function normalizeStatus(
   value: string | null
@@ -87,9 +107,12 @@ function normalizeStatus(
   const level = (value ?? "")
     .trim()
     .toUpperCase()
-    .replace(/_/g, " ");
+    .replace(/[_-]/g, " ");
 
-  if (level === "FULL" || level === "HIGH") {
+  if (
+    level === "FULL" ||
+    level === "HIGH"
+  ) {
     return "Full";
   }
 
@@ -101,41 +124,56 @@ function normalizeStatus(
     return "Near Full";
   }
 
-  if (level === "EMPTY" || level === "LOW") {
+  if (
+    level === "EMPTY" ||
+    level === "LOW"
+  ) {
     return "Empty";
   }
 
   return "No report";
 }
 
+// ========================================
+// CNN CLASSIFICATION INDICATOR
+// ========================================
+
+// These numbers represent the three CNN
+// categories, not exact sensor readings.
+
 function getFillPercent(
   status: FillStatus
 ): number | null {
   if (status === "Full") return 100;
+
   if (status === "Near Full") return 50;
+
   if (status === "Empty") return 0;
+
   return null;
 }
+
+// ========================================
+// COLLECTION STATUS
+// ========================================
 
 function isCollected(
   status: string | null
 ): boolean {
-  return ["collected", "completed", "done"].includes(
-    (status ?? "").trim().toLowerCase()
+  return [
+    "collected",
+    "completed",
+    "done",
+  ].includes(
+    (status ?? "")
+      .trim()
+      .toLowerCase()
   );
 }
 
-function formatWasteType(
-  value: string | null
-): string {
-  if (!value?.trim()) {
-    return "Not specified";
-  }
-
-  return value
-    .trim()
-    .replace(/mixed\s*\/\s*unsorted/i, "Mixed / Unsorted");
-}
+// ========================================
+// FORMAT LAST UPDATED
+// ========================================
 
 function timeAgo(
   dateValue: string | null,
@@ -145,7 +183,8 @@ function timeAgo(
     return "No updates yet";
   }
 
-  const timestamp = new Date(dateValue).getTime();
+  const timestamp =
+    new Date(dateValue).getTime();
 
   if (!Number.isFinite(timestamp)) {
     return "Unknown";
@@ -153,68 +192,209 @@ function timeAgo(
 
   const minutes = Math.max(
     0,
-    Math.floor((now - timestamp) / 60000)
+    Math.floor(
+      (now - timestamp) / 60000
+    )
   );
 
-  if (minutes < 1) return "Just now";
+  if (minutes < 1) {
+    return "Just now";
+  }
 
   if (minutes < 60) {
     return `${minutes} min ago`;
   }
 
-  const hours = Math.floor(minutes / 60);
+  const hours = Math.floor(
+    minutes / 60
+  );
 
   if (hours < 24) {
-    return `${hours} hr${hours > 1 ? "s" : ""} ago`;
+    return `${hours} hr${
+      hours > 1 ? "s" : ""
+    } ago`;
   }
 
-  const days = Math.floor(hours / 24);
+  const days = Math.floor(
+    hours / 24
+  );
 
   if (days < 7) {
-    return `${days} day${days > 1 ? "s" : ""} ago`;
+    return `${days} day${
+      days > 1 ? "s" : ""
+    } ago`;
   }
 
-  return new Date(timestamp).toLocaleDateString(
-    "en-PH",
-    {
-      timeZone: "Asia/Manila",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    }
+  return new Date(
+    timestamp
+  ).toLocaleDateString("en-PH", {
+    timeZone: "Asia/Manila",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+// ========================================
+// STATUS COLORS
+// ========================================
+
+function getStatusStyle(
+  status: FillStatus
+) {
+  switch (status) {
+    case "Full":
+      return {
+        badge:
+          "border-[#F2C9CE] bg-[#FFF0F1] text-[#B82030]",
+        dot:
+          "bg-[#D0102B]",
+        bar:
+          "bg-[#D0102B]",
+      };
+
+    case "Near Full":
+      return {
+        badge:
+          "border-[#F0DCAD] bg-[#FFF6DF] text-[#9A6A08]",
+        dot:
+          "bg-[#E2AC2D]",
+        bar:
+          "bg-[#E2AC2D]",
+      };
+
+    case "Empty":
+      return {
+        badge:
+          "border-[#D4E4BE] bg-[#F1F8E8] text-[#597B31]",
+        dot:
+          "bg-[#7B9E4A]",
+        bar:
+          "bg-[#7B9E4A]",
+      };
+
+    default:
+      return {
+        badge:
+          "border-[#E5E5E5] bg-[#F4F4F4] text-[#777]",
+        dot:
+          "bg-[#999]",
+        bar:
+          "bg-[#999]",
+      };
+  }
+}
+
+// ========================================
+// STATUS BADGE COMPONENT
+// ========================================
+
+function StatusBadge({
+  status,
+}: {
+  status: FillStatus;
+}) {
+  const style =
+    getStatusStyle(status);
+
+  return (
+    <span
+      className={`
+        inline-flex
+        items-center
+        gap-2
+        whitespace-nowrap
+        rounded-full
+        border
+        px-3 py-1.5
+        text-[11px]
+        font-bold
+        ${style.badge}
+      `}
+    >
+      <span
+        className={`
+          h-2 w-2
+          rounded-full
+          ${style.dot}
+        `}
+      />
+
+      {status}
+    </span>
   );
 }
 
-function getInitials(name: string): string {
-  const words = name
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+// ========================================
+// FILL LEVEL INDICATOR
+// ========================================
 
-  if (words.length === 0) return "AD";
+function FillIndicator({
+  site,
+}: {
+  site: Site;
+}) {
+  const style =
+    getStatusStyle(site.status);
 
-  if (words.length === 1) {
-    return words[0].slice(0, 2).toUpperCase();
+  if (site.fillPercent === null) {
+    return (
+      <span
+        className="
+          text-[11px]
+          text-[#999]
+        "
+      >
+        Not available
+      </span>
+    );
   }
 
   return (
-    words[0][0] +
-    words[words.length - 1][0]
-  ).toUpperCase();
+    <div
+      className="
+        flex min-w-0
+        items-center gap-3
+      "
+    >
+      <div
+        className="
+          h-2.5
+          w-full
+          max-w-[160px]
+          overflow-hidden
+          rounded-full
+          bg-[#EEE9E1]
+        "
+        role="progressbar"
+        aria-label={`${site.name} CNN waste classification: ${site.status}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={
+          site.fillPercent
+        }
+      >
+        <div
+          className={`
+            h-full
+            rounded-full
+            transition-all
+            duration-500
+            ${style.bar}
+          `}
+          style={{
+            width:
+              `${site.fillPercent}%`,
+          }}
+        />
+      </div>
+    </div>
+  );
 }
 
-function badgeClass(status: FillStatus) {
-  if (status === "Full") return "full";
-  if (status === "Near Full") return "near";
-  if (status === "Empty") return "empty";
-  return "unknown";
-}
-
-// ==========================================
-// PAGINATED SUPABASE FETCH
-// ==========================================
-
-const PAGE_SIZE = 500;
+// ========================================
+// FETCH ALL ROWS FROM SUPABASE
+// ========================================
 
 async function fetchAllRows<T>(
   table: TableName,
@@ -223,23 +403,35 @@ async function fetchAllRows<T>(
   idColumn: string
 ): Promise<T[]> {
   const rows: T[] = [];
+
   let offset = 0;
 
   while (true) {
-    let query = supabase
+    let request = supabase
       .from(table)
       .select(columns)
-      .order(orderColumn, {
-        ascending: false,
-      });
+      .order(
+        orderColumn,
+        {
+          ascending: false,
+        }
+      );
 
-    if (idColumn !== orderColumn) {
-      query = query.order(idColumn, {
-        ascending: false,
-      });
+    if (
+      idColumn !== orderColumn
+    ) {
+      request = request.order(
+        idColumn,
+        {
+          ascending: false,
+        }
+      );
     }
 
-    const { data, error } = await query.range(
+    const {
+      data,
+      error,
+    } = await request.range(
       offset,
       offset + PAGE_SIZE - 1
     );
@@ -250,11 +442,14 @@ async function fetchAllRows<T>(
       );
     }
 
-    const page = (data ?? []) as unknown as T[];
+    const page =
+      (data ?? []) as unknown as T[];
 
     rows.push(...page);
 
-    if (page.length < PAGE_SIZE) {
+    if (
+      page.length < PAGE_SIZE
+    ) {
       break;
     }
 
@@ -264,9 +459,9 @@ async function fetchAllRows<T>(
   return rows;
 }
 
-// ==========================================
-// BUILD SITE STATUS FROM DATABASE
-// ==========================================
+// ========================================
+// BUILD CURRENT WASTE STATUS
+// ========================================
 
 function buildWasteStatus(
   disposalSites: DisposalSiteRow[],
@@ -274,29 +469,47 @@ function buildWasteStatus(
   schedules: ScheduleRow[],
   collections: CollectionRow[]
 ): Site[] {
-  const activeSites = disposalSites.filter(
-    (site) => site.is_active === true
-  );
+  // ====================================
+  // ACTIVE DISPOSAL SITES
+  // ====================================
 
-  // Latest report per disposal site.
-  const latestReports = new Map<
-    string,
-    WasteReportRow
-  >();
-
-  for (const report of reports) {
-    if (!report.site_id) continue;
-
-    const previous = latestReports.get(
-      report.site_id
+  const activeSites =
+    disposalSites.filter(
+      (site) =>
+        site.is_active === true
     );
+
+  // ====================================
+  // LATEST REPORT PER SITE
+  // ====================================
+
+  const latestReports =
+    new Map<
+      string,
+      WasteReportRow
+    >();
+
+  for (
+    const report of reports
+  ) {
+    if (!report.site_id) {
+      continue;
+    }
+
+    const previous =
+      latestReports.get(
+        report.site_id
+      );
 
     if (
       !previous ||
-      report.date_uploaded > previous.date_uploaded ||
+      report.date_uploaded >
+        previous.date_uploaded ||
       (
-        report.date_uploaded === previous.date_uploaded &&
-        report.report_id > previous.report_id
+        report.date_uploaded ===
+          previous.date_uploaded &&
+        report.report_id >
+          previous.report_id
       )
     ) {
       latestReports.set(
@@ -306,38 +519,58 @@ function buildWasteStatus(
     }
   }
 
-  // Link schedule IDs to disposal sites.
+  // ====================================
+  // MAP COLLECTION SCHEDULES
+  // ====================================
+
   const scheduleMap = new Map(
-    schedules.map((schedule) => [
-      schedule.schedule_id,
-      schedule,
-    ])
+    schedules.map(
+      (schedule) => [
+        schedule.schedule_id,
+        schedule,
+      ]
+    )
   );
 
-  // Latest completed collection at each site.
-  const latestCollections = new Map<
-    string,
-    number
-  >();
+  // ====================================
+  // LATEST COMPLETED COLLECTION
+  // ====================================
+
+  const latestCollections =
+    new Map<string, number>();
 
   function rememberCollection(
     siteId: string | null,
     completedAt: string | null
   ) {
-    if (!siteId || !completedAt) return;
+    if (
+      !siteId ||
+      !completedAt
+    ) {
+      return;
+    }
 
-    const completedTime = new Date(
-      completedAt
-    ).getTime();
+    const completedTime =
+      new Date(
+        completedAt
+      ).getTime();
 
-    if (!Number.isFinite(completedTime)) {
+    if (
+      !Number.isFinite(
+        completedTime
+      )
+    ) {
       return;
     }
 
     const previous =
-      latestCollections.get(siteId) ?? 0;
+      latestCollections.get(
+        siteId
+      ) ?? 0;
 
-    if (completedTime > previous) {
+    if (
+      completedTime > previous
+    ) {
       latestCollections.set(
         siteId,
         completedTime
@@ -345,18 +578,26 @@ function buildWasteStatus(
     }
   }
 
-  // Check actual collections table.
-  for (const collection of collections) {
+  // ====================================
+  // COLLECTIONS TABLE
+  // ====================================
+
+  for (
+    const collection of collections
+  ) {
     if (
       !collection.schedule_id ||
-      !isCollected(collection.collection_status)
+      !isCollected(
+        collection.collection_status
+      )
     ) {
       continue;
     }
 
-    const schedule = scheduleMap.get(
-      collection.schedule_id
-    );
+    const schedule =
+      scheduleMap.get(
+        collection.schedule_id
+      );
 
     rememberCollection(
       schedule?.site_id ?? null,
@@ -364,10 +605,18 @@ function buildWasteStatus(
     );
   }
 
-  // Also support collector workflows that
-  // mark schedules as Collected.
-  for (const schedule of schedules) {
-    if (!isCollected(schedule.status)) {
+  // ====================================
+  // SCHEDULES TABLE
+  // ====================================
+
+  for (
+    const schedule of schedules
+  ) {
+    if (
+      !isCollected(
+        schedule.status
+      )
+    ) {
       continue;
     }
 
@@ -377,661 +626,394 @@ function buildWasteStatus(
     );
   }
 
-  // One row for every active disposal site.
+  // ====================================
+  // BUILD DISPOSAL SITE ROWS
+  // ====================================
+
   return activeSites
-    .map((site): Site => {
-      const report = latestReports.get(
-        site.site_id
-      );
+    .map(
+      (site): Site => {
+        const report =
+          latestReports.get(
+            site.site_id
+          );
 
-      const reportTime = report
-        ? new Date(
-            report.date_uploaded
-          ).getTime()
-        : 0;
+        const reportTime = report
+          ? new Date(
+              report.date_uploaded
+            ).getTime()
+          : 0;
 
-      const collectionTime =
-        latestCollections.get(site.site_id) ?? 0;
+        const collectionTime =
+          latestCollections.get(
+            site.site_id
+          ) ?? 0;
 
-      let status: FillStatus =
-        report
-          ? normalizeStatus(
-              report.cnn_detection_level
-            )
-          : "No report";
+        let status: FillStatus =
+          report
+            ? normalizeStatus(
+                report.cnn_detection_level
+              )
+            : "No report";
 
-      let lastUpdated: string | null =
-        report?.date_uploaded ?? null;
+        let lastUpdated:
+          string | null =
+          report?.date_uploaded ??
+          null;
 
-      let wasteType = formatWasteType(
-        report?.waste_type ?? null
-      );
+        // If a collection was completed
+        // after the last report, treat
+        // the bin as emptied.
 
-      // If the bin was collected AFTER
-      // the latest report, it is treated as
-      // emptied by that collection.
-      if (
-        collectionTime > 0 &&
-        collectionTime > reportTime
-      ) {
-        status = "Empty";
+        if (
+          collectionTime > 0 &&
+          collectionTime > reportTime
+        ) {
+          status = "Empty";
 
-        lastUpdated = new Date(
-          collectionTime
-        ).toISOString();
+          lastUpdated =
+            new Date(
+              collectionTime
+            ).toISOString();
+        }
 
-        wasteType = "Not specified";
+        return {
+          id:
+            site.site_id,
+
+          reportId:
+            report?.report_id ??
+            null,
+
+          name:
+            site.site_name,
+
+          location:
+            site.location ?? "",
+
+          fillPercent:
+            getFillPercent(
+              status
+            ),
+
+          lastUpdated,
+
+          status,
+        };
       }
-
-      return {
-        id: site.site_id,
-        reportId: report?.report_id ?? null,
-        name: site.site_name,
-        location: site.location ?? "",
-        fillPercent: getFillPercent(status),
-        type: wasteType,
-        lastUpdated,
-        status,
-      };
-    })
-    .sort((a, b) =>
-      a.name.localeCompare(b.name)
+    )
+    .sort(
+      (a, b) =>
+        a.name.localeCompare(
+          b.name
+        )
     );
 }
 
-// ==========================================
-// CSS - ORIGINAL DESIGN
-// ==========================================
-
-const css = `
-.ws-root, .ws-root * {
-  box-sizing: border-box;
-}
-
-.ws-root {
-  --red: #a81b1e;
-  --red-bright: #d0102b;
-  --olive: #a5b26b;
-  --cream: #f7f0e4;
-  --cream-line: #d9cfbd;
-  --search: #efe4d0;
-  --ink: #1b1b1b;
-  --muted: #555;
-
-  min-height: 100dvh;
-  background: #fff;
-  color: var(--ink);
-  font-family:
-    "Fira Sans", "Segoe UI",
-    Roboto, Arial, sans-serif;
-}
-
-.ws-head {
-  display: flex;
-  align-items: center;
-  padding: 16px 20px 12px;
-  border-bottom: 5px solid var(--olive);
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-.ws-head-left {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-  flex: 1;
-  min-width: 0;
-}
-
-.ws-title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.ws-sub {
-  margin: 2px 0 0;
-  font-size: 13px;
-  color: #666;
-}
-
-.ws-search {
-  width: 260px;
-  max-width: 100%;
-  height: 36px;
-  padding: 0 14px;
-  background: var(--search);
-  border: 1px solid var(--cream-line);
-  border-radius: 6px;
-  font: inherit;
-  font-size: 14px;
-  color: var(--ink);
-}
-
-.ws-search::placeholder {
-  color: #a9a08f;
-}
-
-.ws-search:focus-visible {
-  outline: 2px solid var(--red);
-  outline-offset: 1px;
-}
-
-.ws-avatar {
-  margin-left: auto;
-  width: 38px;
-  height: 30px;
-  border-radius: 8px;
-  background: #f8ced4;
-  color: var(--red-bright);
-  font-size: 17px;
-  font-weight: 700;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  border: 0;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.ws-avatar:hover {
-  background: #f3b9c3;
-}
-
-.ws-avatar:focus-visible {
-  outline: 2px solid var(--red);
-  outline-offset: 2px;
-}
-
-.ws-body {
-  padding: 16px 20px 24px;
-}
-
-.ws-tabs {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.ws-tab {
-  padding: 8px 18px;
-  border-radius: 8px;
-  font: inherit;
-  font-size: 13.5px;
-  font-weight: 700;
-  cursor: pointer;
-  background: #fff;
-  color: var(--red);
-  border: 1.5px solid var(--red);
-}
-
-.ws-tab:hover {
-  background: #fbeceb;
-}
-
-.ws-tab:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
-}
-
-.ws-tab.selected {
-  background: var(--red);
-  color: #fff;
-}
-
-.ws-panel {
-  background: var(--cream);
-  border: 2px solid #4da3e0;
-  border-radius: 12px;
-  padding: 14px 16px 20px;
-}
-
-.ws-table-wrap {
-  overflow-x: auto;
-  width: 100%;
-}
-
-.ws-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-  min-width: 620px;
-}
-
-.ws-table th {
-  text-align: left;
-  font-weight: 500;
-  color: #555;
-  padding: 4px 10px 10px;
-  border-bottom: 1px solid #b9b2a3;
-}
-
-.ws-table td {
-  padding: 14px 10px;
-  border-bottom: 1px solid #b9b2a3;
-  font-weight: 500;
-}
-
-.ws-table tbody tr:hover {
-  background: rgba(168,27,30,.05);
-}
-
-.ws-table tr.filler td {
-  height: 40px;
-}
-
-.ws-table tr.empty td {
-  text-align: center;
-  color: #777;
-  font-style: italic;
-}
-
-.ws-table tr.empty:hover {
-  background: transparent;
-}
-
-.ws-site-link {
-  display: inline-block;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-}
-
-.ws-site-link:hover {
-  color: var(--red);
-  text-decoration: underline;
-}
-
-.ws-site-link:focus-visible {
-  outline: 2px solid var(--red);
-  outline-offset: 2px;
-}
-
-.ws-site-link:disabled {
-  cursor: default;
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.ws-bar {
-  width: 130px;
-  height: 9px;
-  background: #d9d9d9;
-  border-radius: 5px;
-  overflow: hidden;
-}
-
-.ws-bar > span {
-  display: block;
-  height: 100%;
-  transition: width .25s ease;
-}
-
-.ws-bar.near > span {
-  background: #f0b93a;
-}
-
-.ws-bar.full > span {
-  background: var(--red-bright);
-}
-
-.ws-bar.empty > span {
-  background: var(--olive);
-}
-
-.ws-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border-radius: 6px;
-  font-size: 10px;
-  font-weight: 700;
-  white-space: nowrap;
-  box-shadow: 0 1px 2px rgba(0,0,0,.20);
-}
-
-.ws-badge .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-.ws-badge.near {
-  background: #fbe2b0;
-  border: 1px solid #efc77c;
-  color: #222;
-}
-
-.ws-badge.near .dot {
-  background: #f0b93a;
-}
-
-.ws-badge.full {
-  background: #fff;
-  border: 1px solid var(--red-bright);
-  color: #222;
-}
-
-.ws-badge.full .dot {
-  background: var(--red-bright);
-}
-
-.ws-badge.empty {
-  background: #e2ede0;
-  border: 1px solid var(--olive);
-  color: #222;
-}
-
-.ws-badge.empty .dot {
-  background: var(--olive);
-}
-
-.ws-badge.unknown {
-  background: #eee;
-  border: 1px solid #aaa;
-  color: #555;
-}
-
-.ws-badge.unknown .dot {
-  background: #999;
-}
-
-.ws-message {
-  margin-bottom: 14px;
-  padding: 12px;
-  background: #fff2f2;
-  border: 1px solid #eab9b9;
-  border-radius: 6px;
-  color: #a81b1e;
-  font-size: 12px;
-}
-
-.ws-message button {
-  margin-top: 8px;
-  padding: 6px 12px;
-  background: #fff;
-  border: 1px solid var(--red);
-  border-radius: 5px;
-  color: var(--red);
-  cursor: pointer;
-}
-
-.ws-note {
-  margin-top: 12px;
-  color: #777;
-  font-size: 11px;
-}
-
-@media (max-width: 900px) {
-  .ws-head {
-    gap: 12px;
-  }
-
-  .ws-head-left {
-    gap: 12px;
-  }
-}
-
-@media (max-width: 640px) {
-  .ws-head {
-    padding: 14px;
-    align-items: flex-start;
-  }
-
-  .ws-head-left {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .ws-search {
-    width: 100%;
-  }
-
-  .ws-body {
-    padding: 14px 12px 24px;
-  }
-
-  .ws-tabs {
-    gap: 8px;
-  }
-
-  .ws-tab {
-    padding: 8px 12px;
-    font-size: 12px;
-  }
-
-  .ws-panel {
-    padding: 12px;
-  }
-}
-`;
-
-// ==========================================
+// ========================================
 // MAIN COMPONENT
-// ==========================================
+// ========================================
 
 export default function ManageWasteStatus() {
-  const navigate = useNavigate();
+  const navigate =
+    useNavigate();
 
   const [
     searchParams,
     setSearchParams,
   ] = useSearchParams();
 
-  // Read ?filter=Full or ?filter=Near%20Full
-  // from Admin Dashboard navigation.
+  // ========================================
+  // FILTER FROM URL
+  // ========================================
+
   const requestedFilter =
-    searchParams.get("filter");
+    searchParams.get(
+      "filter"
+    );
 
   const filter: Filter =
-    FILTERS.includes(requestedFilter as Filter)
-      ? (requestedFilter as Filter)
+    FILTERS.includes(
+      requestedFilter as Filter
+    )
+      ? (
+          requestedFilter as Filter
+        )
       : "All";
 
-  const [query, setQuery] = useState("");
-
-  const [allSites, setAllSites] =
-    useState<Site[]>([]);
-
-  const [adminName, setAdminName] =
-    useState("Administrator");
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [error, setError] =
-    useState("");
-
-  const [now, setNow] =
-    useState(Date.now());
-
-  const requestRef = useRef(0);
-
   // ========================================
-  // LOAD SUPABASE DATA
+  // STATES
   // ========================================
 
-  const loadWasteStatus = useCallback(
-    async (showLoading = false) => {
-      const requestId = ++requestRef.current;
+  const [
+    query,
+    setQuery,
+  ] = useState("");
 
-      if (showLoading) {
-        setLoading(true);
-      }
+  const [
+    allSites,
+    setAllSites,
+  ] = useState<Site[]>([]);
 
-      setError("");
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-      try {
-        // STEP 1: AUTHENTICATION
-        const {
-          data: authData,
-          error: authError,
-        } = await supabase.auth.getUser();
+  const [
+    error,
+    setError,
+  ] = useState("");
 
-        if (authError) throw authError;
-
-        if (!authData.user) {
-          throw new Error(
-            "Please sign in to view Waste Status."
-          );
-        }
-
-        // STEP 2: VERIFY ADMIN ACCOUNT
-        const {
-          data: profile,
-          error: profileError,
-        } = await supabase
-          .from("users")
-          .select(
-            "full_name,role,is_active"
-          )
-          .eq(
-            "user_id",
-            authData.user.id
-          )
-          .maybeSingle();
-
-        if (profileError) {
-          throw profileError;
-        }
-
-        if (
-          !profile ||
-          String(profile.role).toLowerCase() !== "admin" ||
-          profile.is_active === false
-        ) {
-          throw new Error(
-            "Administrator access is required."
-          );
-        }
-
-        // STEP 3: LOAD ALL REQUIRED TABLES
-        const [
-          disposalSites,
-          wasteReports,
-          schedules,
-          collections,
-        ] = await Promise.all([
-          fetchAllRows<DisposalSiteRow>(
-            "disposal_sites",
-            "site_id,site_name,location,is_active",
-            "site_id",
-            "site_id"
-          ),
-
-          fetchAllRows<WasteReportRow>(
-            "waste_reports",
-            "report_id,site_id,cnn_detection_level,waste_type,date_uploaded",
-            "date_uploaded",
-            "report_id"
-          ),
-
-          fetchAllRows<ScheduleRow>(
-            "schedules",
-            "schedule_id,site_id,status,date_completed",
-            "schedule_id",
-            "schedule_id"
-          ),
-
-          fetchAllRows<CollectionRow>(
-            "collections",
-            "collection_id,schedule_id,collection_status,completed_at",
-            "collection_id",
-            "collection_id"
-          ),
-        ]);
-
-        if (requestId !== requestRef.current) {
-          return;
-        }
-
-        // STEP 4: CALCULATE CURRENT STATUS
-        const preparedSites = buildWasteStatus(
-          disposalSites,
-          wasteReports,
-          schedules,
-          collections
-        );
-
-        // STEP 5: SAVE ACTUAL DATA
-        setAllSites(preparedSites);
-
-        setAdminName(
-          profile.full_name?.trim() ||
-          "Administrator"
-        );
-
-        setNow(Date.now());
-      } catch (err) {
-        if (requestId !== requestRef.current) {
-          return;
-        }
-
-        console.error(
-          "[WasteTrack] Waste Status error:",
-          err
-        );
-
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to load waste status."
-        );
-      } finally {
-        if (requestId === requestRef.current) {
-          setLoading(false);
-        }
-      }
-    },
-    []
+  const [
+    now,
+    setNow,
+  ] = useState(
+    Date.now()
   );
 
+  const requestRef =
+    useRef(0);
+
   // ========================================
-  // INITIAL LOAD, REALTIME, AUTO REFRESH
+  // LOAD WASTE STATUS FROM SUPABASE
+  // ========================================
+
+  const loadWasteStatus =
+    useCallback(
+      async (
+        showLoading = false
+      ) => {
+        const requestId =
+          ++requestRef.current;
+
+        if (showLoading) {
+          setLoading(true);
+        }
+
+        setError("");
+
+        try {
+          // ==================================
+          // AUTHENTICATION
+          // ==================================
+
+          const {
+            data: authData,
+            error: authError,
+          } =
+            await supabase.auth.getUser();
+
+          if (authError) {
+            throw authError;
+          }
+
+          if (
+            !authData.user
+          ) {
+            throw new Error(
+              "Please sign in to view waste status."
+            );
+          }
+
+          // ==================================
+          // VERIFY ADMIN ACCOUNT
+          // ==================================
+
+          const {
+            data: profile,
+            error: profileError,
+          } = await supabase
+            .from("users")
+            .select(
+              "role,is_active"
+            )
+            .eq(
+              "user_id",
+              authData.user.id
+            )
+            .maybeSingle();
+
+          if (
+            profileError
+          ) {
+            throw profileError;
+          }
+
+          if (
+            !profile ||
+            String(
+              profile.role
+            ).toLowerCase() !==
+              "admin" ||
+            profile.is_active !==
+              true
+          ) {
+            throw new Error(
+              "Administrator access is required."
+            );
+          }
+
+          // ==================================
+          // FETCH REQUIRED SUPABASE TABLES
+          // ==================================
+
+          const [
+            disposalSites,
+            wasteReports,
+            schedules,
+            collections,
+          ] = await Promise.all([
+            fetchAllRows<DisposalSiteRow>(
+              "disposal_sites",
+              "site_id,site_name,location,is_active",
+              "site_id",
+              "site_id"
+            ),
+
+            fetchAllRows<WasteReportRow>(
+              "waste_reports",
+              "report_id,site_id,cnn_detection_level,date_uploaded",
+              "date_uploaded",
+              "report_id"
+            ),
+
+            fetchAllRows<ScheduleRow>(
+              "schedules",
+              "schedule_id,site_id,status,date_completed",
+              "schedule_id",
+              "schedule_id"
+            ),
+
+            fetchAllRows<CollectionRow>(
+              "collections",
+              "collection_id,schedule_id,collection_status,completed_at",
+              "collection_id",
+              "collection_id"
+            ),
+          ]);
+
+          if (
+            requestId !==
+            requestRef.current
+          ) {
+            return;
+          }
+
+          // ==================================
+          // PROCESS SUPABASE DATA
+          // ==================================
+
+          const preparedSites =
+            buildWasteStatus(
+              disposalSites,
+              wasteReports,
+              schedules,
+              collections
+            );
+
+          setAllSites(
+            preparedSites
+          );
+
+          setNow(
+            Date.now()
+          );
+        } catch (err) {
+          if (
+            requestId !==
+            requestRef.current
+          ) {
+            return;
+          }
+
+          console.error(
+            "[WasteTrack] Waste status error:",
+            err
+          );
+
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load waste status."
+          );
+        } finally {
+          if (
+            requestId ===
+            requestRef.current
+          ) {
+            setLoading(false);
+          }
+        }
+      },
+      []
+    );
+
+  // ========================================
+  // AUTO REFRESH + SUPABASE REALTIME
   // ========================================
 
   useEffect(() => {
     void loadWasteStatus(true);
 
-    // Refresh data every 60 seconds.
-    const interval = window.setInterval(() => {
-      void loadWasteStatus(false);
-    }, 60000);
+    // Refresh every 60 seconds.
 
-    // Refresh when the administrator
-    // returns to the browser tab.
+    const interval =
+      window.setInterval(
+        () => {
+          void loadWasteStatus(
+            false
+          );
+        },
+        60000
+      );
+
+    // Refresh when returning to this tab.
+
     const onFocus = () => {
-      void loadWasteStatus(false);
+      void loadWasteStatus(
+        false
+      );
     };
 
-    window.addEventListener("focus", onFocus);
+    window.addEventListener(
+      "focus",
+      onFocus
+    );
 
-    // Realtime database changes.
+    // ==================================
+    // SUPABASE REALTIME
+    // ==================================
+
     let refreshTimer:
-      ReturnType<typeof setTimeout> | null = null;
+      ReturnType<
+        typeof setTimeout
+      > | null = null;
 
     const onDatabaseChange = () => {
-      if (refreshTimer) {
-        clearTimeout(refreshTimer);
+      if (
+        refreshTimer
+      ) {
+        clearTimeout(
+          refreshTimer
+        );
       }
 
-      refreshTimer = setTimeout(() => {
-        void loadWasteStatus(false);
-      }, 500);
+      refreshTimer =
+        setTimeout(
+          () => {
+            void loadWasteStatus(
+              false
+            );
+          },
+          500
+        );
     };
 
-    const channel = supabase.channel(
-      "wastetrack-manage-waste-status"
-    );
+    const channel =
+      supabase.channel(
+        "wastetrack-manage-waste-status"
+      );
 
     const realtimeTables = [
       "disposal_sites",
@@ -1040,7 +1022,9 @@ export default function ManageWasteStatus() {
       "collections",
     ];
 
-    for (const table of realtimeTables) {
+    for (
+      const table of realtimeTables
+    ) {
       channel.on(
         "postgres_changes",
         {
@@ -1057,85 +1041,167 @@ export default function ManageWasteStatus() {
     return () => {
       requestRef.current += 1;
 
-      window.clearInterval(interval);
+      window.clearInterval(
+        interval
+      );
 
       window.removeEventListener(
         "focus",
         onFocus
       );
 
-      if (refreshTimer) {
-        clearTimeout(refreshTimer);
+      if (
+        refreshTimer
+      ) {
+        clearTimeout(
+          refreshTimer
+        );
       }
 
-      void supabase.removeChannel(channel);
+      void supabase.removeChannel(
+        channel
+      );
     };
-  }, [loadWasteStatus]);
+  }, [
+    loadWasteStatus,
+  ]);
 
   // ========================================
-  // UPDATE FILTER IN URL
+  // FILTER COUNTS
   // ========================================
 
-  function changeFilter(nextFilter: Filter) {
-    const nextParams = new URLSearchParams(
-      searchParams
-    );
+  const fullCount =
+    allSites.filter(
+      (site) =>
+        site.status ===
+        "Full"
+    ).length;
 
-    if (nextFilter === "All") {
-      nextParams.delete("filter");
+  const nearFullCount =
+    allSites.filter(
+      (site) =>
+        site.status ===
+        "Near Full"
+    ).length;
+
+  const emptyCount =
+    allSites.filter(
+      (site) =>
+        site.status ===
+        "Empty"
+    ).length;
+
+  const noReportCount =
+    allSites.filter(
+      (site) =>
+        site.status ===
+        "No report"
+    ).length;
+
+  const counts: Record<
+    Filter,
+    number
+  > = {
+    All:
+      allSites.length,
+
+    Empty:
+      emptyCount,
+
+    "Near Full":
+      nearFullCount,
+
+    Full:
+      fullCount,
+
+    "No report":
+      noReportCount,
+  };
+
+  // ========================================
+  // CHANGE FILTER IN URL
+  // ========================================
+
+  function changeFilter(
+    nextFilter: Filter
+  ) {
+    const nextParams =
+      new URLSearchParams(
+        searchParams
+      );
+
+    if (
+      nextFilter === "All"
+    ) {
+      nextParams.delete(
+        "filter"
+      );
     } else {
-      nextParams.set("filter", nextFilter);
+      nextParams.set(
+        "filter",
+        nextFilter
+      );
     }
 
-    setSearchParams(nextParams, {
-      replace: true,
-    });
+    setSearchParams(
+      nextParams,
+      {
+        replace: true,
+      }
+    );
   }
 
   // ========================================
-  // FILTER AND SEARCH ACTUAL SITES
+  // SEARCH + FILTER SITES
   // ========================================
 
-  const sites = useMemo(() => {
-    const q = query.trim().toLowerCase();
+  const sites =
+    useMemo(() => {
+      const q =
+        query
+          .trim()
+          .toLowerCase();
 
-    return allSites.filter((site) => {
-      const matchesFilter =
-        filter === "All" ||
-        site.status === filter;
+      return allSites.filter(
+        (site) => {
+          const matchesFilter =
+            filter === "All" ||
+            site.status ===
+              filter;
 
-      const matchesQuery =
-        !q ||
-        site.name.toLowerCase().includes(q) ||
-        site.location.toLowerCase().includes(q) ||
-        site.type.toLowerCase().includes(q);
+          const matchesQuery =
+            !q ||
+            site.name
+              .toLowerCase()
+              .includes(q) ||
+            site.location
+              .toLowerCase()
+              .includes(q);
 
-      return matchesFilter && matchesQuery;
-    });
-  }, [allSites, filter, query]);
+          return (
+            matchesFilter &&
+            matchesQuery
+          );
+        }
+      );
+    }, [
+      allSites,
+      filter,
+      query,
+    ]);
 
   // ========================================
-  // SUMMARY COUNTS
+  // NAVIGATE TO REPORT DETAILS
   // ========================================
 
-  const fullCount = allSites.filter(
-    (site) => site.status === "Full"
-  ).length;
-
-  const nearFullCount = allSites.filter(
-    (site) => site.status === "Near Full"
-  ).length;
-
-  const emptyCount = allSites.filter(
-    (site) => site.status === "Empty"
-  ).length;
-
-  // ========================================
-  // OPEN SUPABASE REPORT DETAILS
-  // ========================================
-
-  function openSite(site: Site) {
-    if (!site.reportId) return;
+  function openSite(
+    site: Site
+  ) {
+    if (
+      !site.reportId
+    ) {
+      return;
+    }
 
     navigate(
       `/admin/waste-status/${site.reportId}`
@@ -1143,248 +1209,931 @@ export default function ManageWasteStatus() {
   }
 
   // ========================================
-  // RENDER
+  // MAIN UI
   // ========================================
 
   return (
-    <div className="ws-root">
-      <style>{css}</style>
+    <main
+      className="
+        min-h-[100dvh]
+        w-full
+        bg-[#FFFCF8]
+        font-['Fira_Sans','Segoe_UI',Arial,sans-serif]
+        text-[#242424]
+      "
+    >
+      <div
+        className="
+          mx-auto
+          w-full
+          max-w-[1600px]
+          px-4 py-6
+          sm:px-6
+          lg:px-8
+          lg:py-8
+        "
+      >
+        {/* ====================================
+            ERROR MESSAGE
+        ==================================== */}
 
-      {/* ================================= */}
-      {/* HEADER */}
-      {/* ================================= */}
-
-      <header className="ws-head">
-        <div className="ws-head-left">
-          <div>
-            <h1 className="ws-title">
-              Waste status
-            </h1>
-
-            <p className="ws-sub">
-              {loading && allSites.length === 0
-                ? "Loading disposal sites..."
-                : `${allSites.length} disposal sites · Barangay San Miguel`}
-            </p>
-          </div>
-
-          <input
-            className="ws-search"
-            type="search"
-            placeholder="Search sites..."
-            value={query}
-            onChange={(event) =>
-              setQuery(event.target.value)
-            }
-            aria-label="Search sites"
-          />
-        </div>
-
-        {/* ADMIN AVATAR */}
-        <button
-          type="button"
-          className="ws-avatar"
-          aria-label="Manage account"
-          title={adminName}
-          onClick={() =>
-            navigate("/admin/account")
-          }
-        >
-          {getInitials(adminName)}
-        </button>
-      </header>
-
-      {/* ================================= */}
-      {/* BODY */}
-      {/* ================================= */}
-
-      <div className="ws-body">
-
-        {/* ERROR MESSAGE */}
         {error && (
           <div
-            className="ws-message"
             role="alert"
+            className="
+              mb-5
+              flex items-start
+              gap-3
+              rounded-2xl
+              border border-red-200
+              bg-red-50
+              p-4
+            "
           >
-            <strong>
-              Unable to update Waste Status
-            </strong>
+            <AlertCircle
+              size={20}
+              className="
+                mt-0.5
+                shrink-0
+                text-[#B5202A]
+              "
+            />
 
-            <p style={{ margin: "6px 0" }}>
-              {error}
-            </p>
-
-            <button
-              type="button"
-              onClick={() =>
-                void loadWasteStatus(true)
-              }
+            <div
+              className="
+                min-w-0 flex-1
+              "
             >
-              Retry
-            </button>
+              <p
+                className="
+                  text-sm
+                  font-bold
+                  text-[#A81B1E]
+                "
+              >
+                Unable to load waste status
+              </p>
+
+              <p
+                className="
+                  mt-1
+                  break-words
+                  text-xs
+                  leading-relaxed
+                  text-red-700
+                "
+              >
+                {error}
+              </p>
+
+              <button
+                type="button"
+                onClick={() =>
+                  void loadWasteStatus(
+                    true
+                  )
+                }
+                className="
+                  mt-3
+                  rounded-lg
+                  bg-[#A81B1E]
+                  px-4 py-2
+                  text-xs
+                  font-bold
+                  text-white
+                  hover:bg-[#8F1619]
+                "
+              >
+                Try again
+              </button>
+            </div>
           </div>
         )}
 
-        {/* STATUS FILTERS */}
-        <div
-          className="ws-tabs"
-          role="tablist"
-          aria-label="Filter by status"
-        >
-          {FILTERS.map((f) => (
-            <button
-              key={f}
-              type="button"
-              role="tab"
-              aria-selected={filter === f}
-              className={`ws-tab${
-                filter === f
-                  ? " selected"
-                  : ""
-              }`}
-              onClick={() =>
-                changeFilter(f)
-              }
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-
-        {/* ================================= */}
-        {/* WASTE STATUS TABLE */}
-        {/* ================================= */}
+        {/* ====================================
+            DISPOSAL SITES PANEL
+            NO SUMMARY CARDS
+        ==================================== */}
 
         <section
-          className="ws-panel"
-          aria-busy={loading}
+          className="
+            min-w-0
+            overflow-hidden
+            rounded-2xl
+            border
+            border-[#EAE2D7]
+            bg-white
+            shadow-sm
+          "
         >
-          <div className="ws-table-wrap">
-            <table className="ws-table">
-              <thead>
-                <tr>
-                  <th>Site</th>
-                  <th>Fill level</th>
-                  <th>Type</th>
-                  <th>Last updated</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
+          {/* ==================================
+              PANEL HEADER
+          ================================== */}
 
-              <tbody>
-                {sites.map((site) => {
-                  const cls = badgeClass(
-                    site.status
-                  );
+          <div
+            className="
+              border-b
+              border-[#F0E9E0]
+              px-4 py-5
+              sm:px-5
+            "
+          >
+            <div
+              className="
+                flex
+                flex-wrap
+                items-center
+                justify-between
+                gap-4
+              "
+            >
+              {/* SECTION TITLE */}
+
+              <div
+                className="
+                  flex
+                  items-center
+                  gap-3
+                "
+              >
+                <div
+                  className="
+                    flex
+                    h-10 w-10
+                    items-center
+                    justify-center
+                    rounded-xl
+                    bg-[#F7F0E4]
+                    text-[#A81B1E]
+                  "
+                >
+                  <ClipboardList
+                    size={20}
+                  />
+                </div>
+
+                <h2
+                  className="
+                    text-[16px]
+                    font-extrabold
+                    sm:text-[18px]
+                  "
+                >
+                  Disposal sites
+                </h2>
+              </div>
+
+              {/* ==================================
+                  SEARCH BAR
+              ================================== */}
+
+              <div
+                className="
+                  relative
+                  w-full
+                  sm:max-w-[320px]
+                "
+              >
+                <Search
+                  size={17}
+                  className="
+                    absolute
+                    left-3.5
+                    top-1/2
+                    -translate-y-1/2
+                    text-[#A09A91]
+                  "
+                />
+
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) =>
+                    setQuery(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Search disposal sites..."
+                  aria-label="Search disposal sites"
+                  className="
+                    h-11 w-full
+                    rounded-xl
+                    border
+                    border-[#E4DCD0]
+                    bg-[#FFFCF8]
+                    pl-10 pr-10
+                    text-[12px]
+                    outline-none
+                    transition
+                    placeholder:text-[#AAA]
+                    focus:border-[#A5B26B]
+                    focus:ring-2
+                    focus:ring-[#A5B26B]/20
+                  "
+                />
+
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQuery("")
+                    }
+                    aria-label="Clear search"
+                    className="
+                      absolute
+                      right-3
+                      top-1/2
+                      -translate-y-1/2
+                      text-[#999]
+                      hover:text-[#555]
+                    "
+                  >
+                    <X
+                      size={17}
+                    />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* ==================================
+                FILTER TABS
+            ================================== */}
+
+            <div
+              className="
+                mt-5
+                flex
+                flex-wrap
+                gap-2
+              "
+              aria-label="Filter disposal sites by waste level"
+            >
+              {FILTERS.map(
+                (item) => {
+                  const selected =
+                    filter ===
+                    item;
 
                   return (
-                    <tr key={site.id}>
-                      {/* SITE NAME */}
-                      <td>
-                        <button
-                          type="button"
-                          className="ws-site-link"
-                          disabled={!site.reportId}
-                          title={
-                            site.reportId
-                              ? "View report details"
-                              : "No submitted report available"
-                          }
-                          onClick={() =>
-                            openSite(site)
-                          }
-                        >
-                          {site.name}
-                        </button>
-                      </td>
+                    <button
+                      key={item}
+                      type="button"
+                      aria-pressed={
+                        selected
+                      }
+                      onClick={() =>
+                        changeFilter(
+                          item
+                        )
+                      }
+                      className={`
+                        inline-flex
+                        items-center
+                        gap-2
+                        rounded-xl
+                        px-3.5 py-2.5
+                        text-[12px]
+                        font-bold
+                        transition
+                        ${
+                          selected
+                            ? "bg-[#A81B1E] text-white shadow-sm"
+                            : "border border-[#E7DDD0] bg-[#FFFCF8] text-[#666] hover:bg-[#F7F0E4]"
+                        }
+                      `}
+                    >
+                      {item ===
+                      "Near Full"
+                        ? "Half-full"
+                        : item}
 
-                      {/* FILL LEVEL */}
-                      <td>
-                        {site.fillPercent !== null ? (
-                          <div
-                            className={`ws-bar ${cls}`}
-                            role="progressbar"
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={
-                              site.fillPercent
-                            }
-                            aria-label={`${site.name} estimated fill level`}
+                      <span
+                        className={`
+                          rounded-md
+                          px-1.5 py-0.5
+                          text-[10px]
+                          ${
+                            selected
+                              ? "bg-white/20 text-white"
+                              : "bg-[#F2EDE5] text-[#777]"
+                          }
+                        `}
+                      >
+                        {
+                          counts[
+                            item
+                          ]
+                        }
+                      </span>
+                    </button>
+                  );
+                }
+              )}
+            </div>
+          </div>
+
+          {/* ====================================
+              LOADING STATE
+          ==================================== */}
+
+          {loading &&
+          allSites.length === 0 ? (
+            <div
+              role="status"
+              className="
+                flex
+                min-h-[220px]
+                flex-col
+                items-center
+                justify-center
+                gap-3
+                text-center
+              "
+            >
+              <LoaderCircle
+                size={30}
+                className="
+                  animate-spin
+                  text-[#A5B26B]
+                "
+              />
+
+              <p
+                className="
+                  text-[12px]
+                  text-[#777]
+                "
+              >
+                Loading disposal sites...
+              </p>
+            </div>
+          ) : sites.length === 0 ? (
+            // ==================================
+            // EMPTY STATE
+            // ==================================
+
+            <div
+              className="
+                flex
+                min-h-[230px]
+                flex-col
+                items-center
+                justify-center
+                p-6
+                text-center
+              "
+            >
+              <div
+                className="
+                  flex
+                  h-14 w-14
+                  items-center
+                  justify-center
+                  rounded-2xl
+                  bg-[#F7F0E4]
+                  text-[#A5B26B]
+                "
+              >
+                <Inbox
+                  size={27}
+                />
+              </div>
+
+              <p
+                className="
+                  mt-4
+                  text-[13px]
+                  font-bold
+                  text-[#333]
+                "
+              >
+                No sites found
+              </p>
+
+              <p
+                className="
+                  mt-1
+                  text-[11px]
+                  text-[#999]
+                "
+              >
+                {error
+                  ? "Waste status data is unavailable."
+                  : "No sites match your search or filter."}
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* ==================================
+                  DESKTOP / TABLET TABLE
+              ================================== */}
+
+              <div
+                className="
+                  hidden
+                  overflow-x-auto
+                  md:block
+                "
+              >
+                <table
+                  className="
+                    w-full
+                    min-w-[670px]
+                    border-collapse
+                    text-left
+                  "
+                >
+                  <thead>
+                    <tr
+                      className="
+                        bg-[#FFFCF8]
+                        text-[11px]
+                        text-[#888]
+                      "
+                    >
+                      <th
+                        className="
+                          px-5 py-4
+                          font-semibold
+                        "
+                      >
+                        Disposal site
+                      </th>
+
+                      <th
+                        className="
+                          px-4 py-4
+                          font-semibold
+                        "
+                      >
+                        Fill level
+                      </th>
+
+                      <th
+                        className="
+                          px-4 py-4
+                          font-semibold
+                        "
+                      >
+                        Last updated
+                      </th>
+
+                      <th
+                        className="
+                          px-4 py-4
+                          font-semibold
+                        "
+                      >
+                        Status
+                      </th>
+
+                      <th
+                        className="
+                          px-4 py-4
+                          text-right
+                          font-semibold
+                        "
+                      >
+                        Details
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {sites.map(
+                      (site) => (
+                        <tr
+                          key={
+                            site.id
+                          }
+                          className="
+                            border-t
+                            border-[#F1EAE2]
+                            transition
+                            hover:bg-[#FFFCF8]
+                          "
+                        >
+                          {/* ==================================
+                              SITE NAME AND LOCATION
+                          ================================== */}
+
+                          <td
+                            className="
+                              max-w-[280px]
+                              px-5 py-4
+                            "
+                          >
+                            <div
+                              className="
+                                flex
+                                items-start
+                                gap-2
+                              "
+                            >
+                              <MapPin
+                                size={17}
+                                className="
+                                  mt-0.5
+                                  shrink-0
+                                  text-[#A81B1E]
+                                "
+                              />
+
+                              <div className="min-w-0">
+                                <button
+                                  type="button"
+                                  disabled={
+                                    !site.reportId
+                                  }
+                                  onClick={() =>
+                                    openSite(
+                                      site
+                                    )
+                                  }
+                                  className="
+                                    break-words
+                                    text-left
+                                    text-[12px]
+                                    font-bold
+                                    text-[#343434]
+                                    hover:text-[#A81B1E]
+                                    hover:underline
+                                    disabled:cursor-default
+                                    disabled:hover:text-[#343434]
+                                    disabled:hover:no-underline
+                                  "
+                                >
+                                  {
+                                    site.name
+                                  }
+                                </button>
+
+                                {site.location && (
+                                  <p
+                                    className="
+                                      mt-1
+                                      break-words
+                                      text-[10px]
+                                      text-[#999]
+                                    "
+                                  >
+                                    {
+                                      site.location
+                                    }
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* ==================================
+                              FILL LEVEL
+                          ================================== */}
+
+                          <td
+                            className="
+                              px-4 py-4
+                            "
+                          >
+                            <FillIndicator
+                              site={
+                                site
+                              }
+                            />
+                          </td>
+
+                          {/* ==================================
+                              LAST UPDATED
+                          ================================== */}
+
+                          <td
+                            className="
+                              px-4 py-4
+                              text-[11px]
+                              text-[#888]
+                            "
                           >
                             <span
-                              style={{
-                                width: `${site.fillPercent}%`,
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <span
-                            style={{
-                              color: "#777",
-                            }}
+                              className="
+                                inline-flex
+                                items-center
+                                gap-1.5
+                              "
+                            >
+                              <Clock3
+                                size={13}
+                              />
+
+                              {timeAgo(
+                                site.lastUpdated,
+                                now
+                              )}
+                            </span>
+                          </td>
+
+                          {/* ==================================
+                              WASTE STATUS
+                          ================================== */}
+
+                          <td
+                            className="
+                              px-4 py-4
+                            "
                           >
-                            Not available
-                          </span>
-                        )}
-                      </td>
+                            <StatusBadge
+                              status={
+                                site.status
+                              }
+                            />
+                          </td>
 
-                      {/* WASTE TYPE */}
-                      <td>{site.type}</td>
+                          {/* ==================================
+                              DETAILS BUTTON
+                          ================================== */}
 
-                      {/* LAST UPDATED */}
-                      <td>
-                        {timeAgo(
-                          site.lastUpdated,
-                          now
-                        )}
-                      </td>
+                          <td
+                            className="
+                              px-4 py-4
+                              text-right
+                            "
+                          >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openSite(
+                                  site
+                                )
+                              }
+                              disabled={
+                                !site.reportId
+                              }
+                              aria-label={`View reports for ${site.name}`}
+                              className="
+                                inline-flex
+                                h-9 w-9
+                                items-center
+                                justify-center
+                                rounded-lg
+                                border
+                                border-[#E7DDD0]
+                                bg-white
+                                text-[#A81B1E]
+                                transition
+                                hover:bg-[#FFF0EC]
+                                disabled:cursor-not-allowed
+                                disabled:opacity-30
+                              "
+                            >
+                              <ArrowUpRight
+                                size={17}
+                              />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-                      {/* STATUS */}
-                      <td>
-                        <span
-                          className={`ws-badge ${cls}`}
+              {/* ==================================
+                  MOBILE SITE CARDS
+              ================================== */}
+
+              <div
+                className="
+                  divide-y
+                  divide-[#F1EAE2]
+                  md:hidden
+                "
+              >
+                {sites.map(
+                  (site) => (
+                    <article
+                      key={
+                        site.id
+                      }
+                      className="
+                        px-4 py-5
+                        sm:px-5
+                      "
+                    >
+                      {/* ==================================
+                          SITE NAME AND STATUS
+                      ================================== */}
+
+                      <div
+                        className="
+                          flex
+                          flex-wrap
+                          items-start
+                          justify-between
+                          gap-3
+                        "
+                      >
+                        <div
+                          className="
+                            flex
+                            min-w-0
+                            flex-1
+                            items-start
+                            gap-2
+                          "
                         >
-                          <span className="dot" />
-                          {site.status}
+                          <MapPin
+                            size={18}
+                            className="
+                              mt-0.5
+                              shrink-0
+                              text-[#A81B1E]
+                            "
+                          />
+
+                          <div className="min-w-0">
+                            <h3
+                              className="
+                                break-words
+                                text-[13px]
+                                font-extrabold
+                              "
+                            >
+                              {
+                                site.name
+                              }
+                            </h3>
+
+                            {site.location && (
+                              <p
+                                className="
+                                  mt-1
+                                  break-words
+                                  text-[11px]
+                                  leading-relaxed
+                                  text-[#999]
+                                "
+                              >
+                                {
+                                  site.location
+                                }
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <StatusBadge
+                          status={
+                            site.status
+                          }
+                        />
+                      </div>
+
+                      {/* ==================================
+                          FILL LEVEL
+                      ================================== */}
+
+                      <div
+                        className="
+                          mt-4
+                          rounded-xl
+                          bg-[#FFFCF8]
+                          p-3.5
+                        "
+                      >
+                        <p
+                          className="
+                            text-[10px]
+                            font-semibold
+                            uppercase
+                            tracking-wide
+                            text-[#999]
+                          "
+                        >
+                          Fill level
+                        </p>
+
+                        <div
+                          className="
+                            mt-2
+                          "
+                        >
+                          <FillIndicator
+                            site={
+                              site
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      {/* ==================================
+                          LAST UPDATED + LINK
+                      ================================== */}
+
+                      <div
+                        className="
+                          mt-4
+                          flex
+                          flex-wrap
+                          items-center
+                          justify-between
+                          gap-3
+                        "
+                      >
+                        <span
+                          className="
+                            inline-flex
+                            items-center
+                            gap-1.5
+                            text-[11px]
+                            text-[#999]
+                          "
+                        >
+                          <Clock3
+                            size={14}
+                          />
+
+                          {timeAgo(
+                            site.lastUpdated,
+                            now
+                          )}
                         </span>
-                      </td>
-                    </tr>
-                  );
-                })}
 
-                {/* EMPTY / LOADING STATE */}
-                {sites.length === 0 && (
-                  <tr className="empty">
-                    <td colSpan={5}>
-                      {loading
-                        ? "Loading waste status from Supabase..."
-                        : error && allSites.length === 0
-                          ? "Waste status is unavailable."
-                          : "No sites match this filter."}
-                    </td>
-                  </tr>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openSite(
+                              site
+                            )
+                          }
+                          disabled={
+                            !site.reportId
+                          }
+                          className="
+                            inline-flex
+                            items-center
+                            gap-1
+                            text-[11px]
+                            font-bold
+                            text-[#A81B1E]
+                            hover:underline
+                            disabled:cursor-not-allowed
+                            disabled:opacity-40
+                            disabled:no-underline
+                          "
+                        >
+                          View details
+
+                          <ChevronRight
+                            size={15}
+                          />
+                        </button>
+                      </div>
+                    </article>
+                  )
                 )}
+              </div>
+            </>
+          )}
 
-                {/* ORIGINAL TABLE SPACING */}
-                <tr className="filler">
-                  <td colSpan={5} />
-                </tr>
+          {/* ====================================
+              FOOTER
+          ==================================== */}
 
-                <tr className="filler">
-                  <td colSpan={5} />
-                </tr>
-              </tbody>
-            </table>
+          <div
+            className="
+              flex
+              flex-wrap
+              items-center
+              justify-between
+              gap-2
+              border-t
+              border-[#F0E9E0]
+              bg-[#FFFCF8]
+              px-4 py-3
+              sm:px-5
+            "
+          >
+            <p
+              className="
+                text-[11px]
+                text-[#999]
+              "
+            >
+              Showing {sites.length} of{" "}
+              {allSites.length} sites
+            </p>
+
+            <p
+              className="
+                text-[10px]
+                text-[#AAA]
+              "
+            >
+              Latest waste levels
+            </p>
           </div>
         </section>
-
-        {/* STATUS SUMMARY */}
-        <p className="ws-note">
-          {fullCount} Full ·{" "}
-          {nearFullCount} Near Full ·{" "}
-          {emptyCount} Empty
-        </p>
       </div>
-    </div>
+    </main>
   );
 }

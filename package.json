@@ -1,20 +1,18 @@
-
 {
   "name": "waste-track-complete",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-
-"scripts": {
-  "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:cnn\"",
-  "dev:frontend": "vite --host localhost --port 5173 --strictPort",
-  "dev:cnn": "\".\\.venv\\Scripts\\python.exe\" -m uvicorn main:app --app-dir src/cnn_backend --host 127.0.0.1 --port 8000",
-  "build": "tsc -b && vite build",
-  "preview": "vite preview"
-}
-,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:cnn\"",
+    "dev:frontend": "vite --host localhost --port 5173 --strictPort",
+    "dev:cnn": "\".\\.venv\\Scripts\\python.exe\" -m uvicorn main:app --app-dir src/cnn_backend --host 127.0.0.1 --port 8000",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
+    "jspdf": "^4.2.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.468.0",
     "qr-scanner": "^1.4.2",

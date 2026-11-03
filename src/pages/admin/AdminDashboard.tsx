@@ -1,11 +1,32 @@
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
 import { useNavigate } from "react-router";
+
+import {
+  AlertCircle,
+  ArrowUpRight,
+  ClipboardList,
+  Clock3,
+  FileText,
+  LoaderCircle,
+  MapPin,
+  Search,
+  Trash2,
+  TrendingUp,
+  X,
+} from "lucide-react";
+
 import { supabase } from "../../lib/supabase";
 
-// ==========================================
+// ========================================
 // DATABASE TYPES
-// ==========================================
+// ========================================
 
 type SiteRow = {
   site_id: string;
@@ -47,7 +68,11 @@ type CollectionRow = {
   completed_at: string | null;
 };
 
-type ReportLevel = "Full" | "Near Full" | "Empty" | "Unknown";
+type ReportLevel =
+  | "Full"
+  | "Near Full"
+  | "Empty"
+  | "Unknown";
 
 type DashboardReport = {
   id: string;
@@ -61,25 +86,9 @@ type DashboardData = {
   fullBins: number;
   nearFullBins: number;
   pendingReports: number;
-  collectedToday: number;
-  totalSites: number;
-  progress: number;
   recentReports: DashboardReport[];
   adminName: string;
 };
-
-interface Stat {
-  value: string;
-  label: string;
-  color: string;
-  to?: string;
-}
-
-// ==========================================
-// HELPERS
-// ==========================================
-
-const PAGE_SIZE = 500;
 
 type SourceTable =
   | "disposal_sites"
@@ -89,8 +98,12 @@ type SourceTable =
   | "schedules"
   | "collections";
 
-// Fetch all pages to avoid Supabase's
-// default maximum rows per request.
+// ========================================
+// SUPABASE PAGINATION
+// ========================================
+
+const PAGE_SIZE = 500;
+
 async function fetchAllRows<T>(
   table: SourceTable,
   columns: string,
@@ -104,7 +117,9 @@ async function fetchAllRows<T>(
     let request = supabase
       .from(table)
       .select(columns)
-      .order(orderColumn, { ascending: false });
+      .order(orderColumn, {
+        ascending: false,
+      });
 
     if (orderColumn !== idColumn) {
       request = request.order(idColumn, {
@@ -118,13 +133,18 @@ async function fetchAllRows<T>(
     );
 
     if (error) {
-      throw new Error(`${table}: ${error.message}`);
+      throw new Error(
+        `${table}: ${error.message}`
+      );
     }
 
-    const page = (data ?? []) as unknown as T[];
-    allRows.push(...page);
+    const rows = (data ?? []) as unknown as T[];
 
-    if (page.length < PAGE_SIZE) break;
+    allRows.push(...rows);
+
+    if (rows.length < PAGE_SIZE) {
+      break;
+    }
 
     offset += PAGE_SIZE;
   }
@@ -132,13 +152,22 @@ async function fetchAllRows<T>(
   return allRows;
 }
 
-function getLevel(value: string | null): ReportLevel {
+// ========================================
+// HELPER FUNCTIONS
+// ========================================
+
+function getLevel(
+  value: string | null
+): ReportLevel {
   const normalized = (value ?? "")
     .trim()
     .toUpperCase()
     .replace(/_/g, " ");
 
-  if (normalized === "FULL" || normalized === "HIGH") {
+  if (
+    normalized === "FULL" ||
+    normalized === "HIGH"
+  ) {
     return "Full";
   }
 
@@ -150,39 +179,37 @@ function getLevel(value: string | null): ReportLevel {
     return "Near Full";
   }
 
-  if (normalized === "EMPTY" || normalized === "LOW") {
+  if (
+    normalized === "EMPTY" ||
+    normalized === "LOW"
+  ) {
     return "Empty";
   }
 
   return "Unknown";
 }
 
-function isCompleted(value: string | null): boolean {
-  return ["collected", "completed", "done"].includes(
+function isCompleted(
+  value: string | null
+): boolean {
+  return [
+    "collected",
+    "completed",
+    "done",
+  ].includes(
     (value ?? "").trim().toLowerCase()
   );
 }
 
-function getManilaDayStart(): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Manila",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-
-  const get = (type: string) =>
-    parts.find((part) => part.type === type)?.value ?? "";
-
-  return new Date(
-    `${get("year")}-${get("month")}-${get("day")}T00:00:00+08:00`
-  ).getTime();
-}
-
-function timeAgo(value: string, now: number): string {
+function timeAgo(
+  value: string,
+  now: number
+): string {
   const timestamp = new Date(value).getTime();
 
-  if (!Number.isFinite(timestamp)) return "Unknown";
+  if (!Number.isFinite(timestamp)) {
+    return "Unknown";
+  }
 
   const minutes = Math.max(
     0,
@@ -204,31 +231,20 @@ function timeAgo(value: string, now: number): string {
     return `${days} day${days > 1 ? "s" : ""} ago`;
   }
 
-  return new Date(timestamp).toLocaleDateString("en-PH", {
-    timeZone: "Asia/Manila",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return new Date(timestamp).toLocaleDateString(
+    "en-PH",
+    {
+      timeZone: "Asia/Manila",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }
+  );
 }
 
-function getInitials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-
-  if (words.length === 0) return "AD";
-
-  if (words.length === 1) {
-    return words[0].slice(0, 2).toUpperCase();
-  }
-
-  return (
-    words[0][0] + words[words.length - 1][0]
-  ).toUpperCase();
-}
-
-// ==========================================
-// CALCULATE DASHBOARD DATA
-// ==========================================
+// ========================================
+// BUILD DASHBOARD DATA
+// ========================================
 
 function buildDashboard(
   sites: SiteRow[],
@@ -239,6 +255,10 @@ function buildDashboard(
   collections: CollectionRow[],
   adminName: string
 ): DashboardData {
+  // ====================================
+  // ACTIVE SITES
+  // ====================================
+
   const activeSites = sites.filter(
     (site) => site.is_active === true
   );
@@ -264,34 +284,58 @@ function buildDashboard(
     ])
   );
 
-  // Latest status per report.
-  const latestStatus = new Map<string, StatusRow>();
+  // ====================================
+  // LATEST REPORT STATUS
+  // ====================================
+
+  const latestStatus = new Map<
+    string,
+    StatusRow
+  >();
 
   for (const row of statuses) {
-    const previous = latestStatus.get(row.report_id);
+    const previous = latestStatus.get(
+      row.report_id
+    );
 
     if (
       !previous ||
       row.created_at > previous.created_at ||
-      (row.created_at === previous.created_at &&
-        row.status_id > previous.status_id)
+      (
+        row.created_at === previous.created_at &&
+        row.status_id > previous.status_id
+      )
     ) {
       latestStatus.set(row.report_id, row);
     }
   }
 
-  const pendingReports = reports.filter((report) => {
-    const latest = latestStatus.get(report.report_id);
+  // ====================================
+  // PENDING REPORTS
+  // ====================================
 
-    return latest?.status.trim().toLowerCase() === "pending";
-  }).length;
+  const pendingReports = reports.filter(
+    (report) => {
+      const latest = latestStatus.get(
+        report.report_id
+      );
 
-  // Map the latest completed collection to each site.
-  const lastCollectionBySite = new Map<string, number>();
-  const collectedTodaySites = new Set<string>();
+      return (
+        latest?.status
+          .trim()
+          .toLowerCase() === "pending"
+      );
+    }
+  ).length;
 
-  const startToday = getManilaDayStart();
-  const endToday = startToday + 24 * 60 * 60 * 1000;
+  // ====================================
+  // COMPLETED COLLECTIONS BY SITE
+  // ====================================
+
+  const lastCollectionBySite = new Map<
+    string,
+    number
+  >();
 
   for (const collection of collections) {
     if (
@@ -306,46 +350,65 @@ function buildDashboard(
       collection.schedule_id
     );
 
-    if (!siteId || !siteMap.has(siteId)) continue;
+    if (!siteId || !siteMap.has(siteId)) {
+      continue;
+    }
 
     const completedTime = new Date(
       collection.completed_at
     ).getTime();
 
-    if (!Number.isFinite(completedTime)) continue;
-
-    const previous = lastCollectionBySite.get(siteId) ?? 0;
-
-    if (completedTime > previous) {
-      lastCollectionBySite.set(siteId, completedTime);
-    }
-
-    if (
-      completedTime >= startToday &&
-      completedTime < endToday
-    ) {
-      collectedTodaySites.add(siteId);
-    }
-  }
-
-  // One latest report per registered active site.
-  const latestReportBySite = new Map<string, ReportRow>();
-
-  for (const report of reports) {
-    if (!report.site_id || !siteMap.has(report.site_id)) {
+    if (!Number.isFinite(completedTime)) {
       continue;
     }
 
-    const previous = latestReportBySite.get(report.site_id);
+    const previous =
+      lastCollectionBySite.get(siteId) ?? 0;
+
+    if (completedTime > previous) {
+      lastCollectionBySite.set(
+        siteId,
+        completedTime
+      );
+    }
+  }
+
+  // ====================================
+  // LATEST REPORT PER SITE
+  // ====================================
+
+  const latestReportBySite = new Map<
+    string,
+    ReportRow
+  >();
+
+  for (const report of reports) {
+    if (
+      !report.site_id ||
+      !siteMap.has(report.site_id)
+    ) {
+      continue;
+    }
+
+    const previous = latestReportBySite.get(
+      report.site_id
+    );
 
     if (
       !previous ||
       new Date(report.date_uploaded).getTime() >
         new Date(previous.date_uploaded).getTime()
     ) {
-      latestReportBySite.set(report.site_id, report);
+      latestReportBySite.set(
+        report.site_id,
+        report
+      );
     }
   }
+
+  // ====================================
+  // CURRENT BIN LEVEL COUNTS
+  // ====================================
 
   let fullBins = 0;
   let nearFullBins = 0;
@@ -355,12 +418,13 @@ function buildDashboard(
       report.date_uploaded
     ).getTime();
 
-    const latestCollection =
+    const lastCollection =
       lastCollectionBySite.get(siteId) ?? 0;
 
-    // A completed collection after the report
-    // clears the earlier reported level.
-    if (latestCollection >= reportTime) {
+    if (
+      Number.isFinite(reportTime) &&
+      lastCollection >= reportTime
+    ) {
       continue;
     }
 
@@ -368,406 +432,114 @@ function buildDashboard(
       report.cnn_detection_level
     );
 
-    if (level === "Full") fullBins++;
+    if (level === "Full") {
+      fullBins++;
+    }
 
-    if (level === "Near Full") nearFullBins++;
+    if (level === "Near Full") {
+      nearFullBins++;
+    }
   }
 
-  const collectedToday = collectedTodaySites.size;
-  const totalSites = activeSites.length;
+  // ====================================
+  // RECENT REPORTS
+  // ====================================
 
-  const progress =
-    totalSites > 0
-      ? Math.min(
-          100,
-          Math.round((collectedToday / totalSites) * 100)
-        )
-      : 0;
+  const recentReports: DashboardReport[] =
+    [...reports]
+      .sort(
+        (a, b) =>
+          new Date(b.date_uploaded).getTime() -
+            new Date(a.date_uploaded).getTime() ||
+          b.report_id.localeCompare(a.report_id)
+      )
+      .map((report) => ({
+        id: report.report_id,
 
-  // Most recent reports first.
-  const recentReports: DashboardReport[] = [...reports]
-    .sort(
-      (a, b) =>
-        new Date(b.date_uploaded).getTime() -
-          new Date(a.date_uploaded).getTime() ||
-        b.report_id.localeCompare(a.report_id)
-    )
-    .map((report) => ({
-      id: report.report_id,
-      site:
-        (report.site_id
-          ? siteMap.get(report.site_id)
-          : undefined) ||
-        report.site_description ||
-        report.address ||
-        "Unknown site",
+        site:
+          (
+            report.site_id
+              ? siteMap.get(report.site_id)
+              : undefined
+          ) ||
+          report.site_description ||
+          report.address ||
+          "Unknown site",
 
-      by:
-        userMap.get(report.user_id) ||
-        "Unknown reporter",
+        by:
+          userMap.get(report.user_id) ||
+          "Unknown reporter",
 
-      date: report.date_uploaded,
+        date: report.date_uploaded,
 
-      level: getLevel(
-        report.cnn_detection_level
-      ),
-    }));
+        level: getLevel(
+          report.cnn_detection_level
+        ),
+      }));
 
   return {
     fullBins,
     nearFullBins,
     pendingReports,
-    collectedToday,
-    totalSites,
-    progress,
     recentReports,
     adminName,
   };
 }
 
-// ==========================================
-// ORIGINAL DASHBOARD CSS
-// ==========================================
+// ========================================
+// WASTE LEVEL BADGE
+// ========================================
 
-const css = `
-.ad-root, .ad-root * { box-sizing: border-box; }
+function WasteBadge({
+  level,
+}: {
+  level: ReportLevel;
+}) {
+  const styles: Record<ReportLevel, string> = {
+    Full:
+      "border-[#F2C9CE] bg-[#FFF0F1] text-[#B82030]",
+    "Near Full":
+      "border-[#F0DCAD] bg-[#FFF6DF] text-[#9A6A08]",
+    Empty:
+      "border-[#D4E4BE] bg-[#F1F8E8] text-[#597B31]",
+    Unknown:
+      "border-[#E5E5E5] bg-[#F4F4F4] text-[#777]",
+  };
 
-.ad-root {
-  --red: #a81b1e;
-  --red-bright: #d0102b;
-  --cream: #f7f0e4;
-  --cream-line: #d9cfbd;
-  --search: #efe4d0;
-  --ink: #1b1b1b;
-  --muted: #555;
+  const dots: Record<ReportLevel, string> = {
+    Full: "bg-[#D0102B]",
+    "Near Full": "bg-[#E2AC2D]",
+    Empty: "bg-[#7B9E4A]",
+    Unknown: "bg-[#999]",
+  };
 
-  min-height: 100dvh;
-  background: #fff;
-  color: var(--ink);
-  padding: 22px 20px 28px;
-  font-family: "Fira Sans", "Segoe UI", Roboto, Arial, sans-serif;
+  return (
+    <span
+      className={`
+        inline-flex items-center gap-2
+        whitespace-nowrap rounded-full
+        border px-3 py-1.5
+        text-[11px] font-bold
+        ${styles[level]}
+      `}
+    >
+      <span
+        className={`h-2 w-2 rounded-full ${dots[level]}`}
+      />
+      {level}
+    </span>
+  );
 }
 
-.ad-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.ad-title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.ad-avatar {
-  width: 46px;
-  height: 34px;
-  border-radius: 10px;
-  background: #f8ced4;
-  color: var(--red-bright);
-  font-size: 18px;
-  font-weight: 700;
-  display: grid;
-  place-items: center;
-  border: 0;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.ad-avatar:hover { background: #f3b9c3; }
-
-.ad-avatar:focus-visible {
-  outline: 2px solid var(--red);
-  outline-offset: 2px;
-}
-
-.ad-search-row {
-  display: flex;
-  align-items: center;
-  gap: 22px;
-  margin-top: 8px;
-}
-
-.ad-overview {
-  font-size: 11.5px;
-  line-height: 1.3;
-  flex-shrink: 0;
-}
-
-.ad-search {
-  flex: 1;
-  min-width: 0;
-  max-width: 450px;
-  height: 36px;
-  padding: 0 14px;
-  background: var(--search);
-  border: 1px solid var(--cream-line);
-  border-radius: 6px;
-  font: inherit;
-  font-size: 15px;
-  color: var(--ink);
-}
-
-.ad-search::placeholder { color: #a9a08f; }
-
-.ad-search:focus-visible {
-  outline: 2px solid var(--red);
-  outline-offset: 1px;
-}
-
-.ad-stats {
-  margin-top: 18px;
-  background: var(--cream);
-  border-radius: 6px;
-  padding: 8px 16px;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 26px;
-}
-
-.ad-stat {
-  background: #fff;
-  color: var(--ink);
-  border: 1px solid var(--cream-line);
-  border-radius: 8px;
-  box-shadow: 0 2px 0 #cfc7a8;
-  padding: 10px 16px 12px;
-  text-align: left;
-  font-family: inherit;
-  cursor: default;
-  min-width: 0;
-}
-
-.ad-stat.clickable { cursor: pointer; }
-
-.ad-stat.clickable:hover {
-  background: #fdfbf6;
-  box-shadow: 0 2px 0 #b9b191;
-}
-
-.ad-stat.clickable:focus-visible {
-  outline: 2px solid var(--red);
-  outline-offset: 2px;
-}
-
-.ad-stat-value {
-  font-size: 26px;
-  font-weight: 600;
-  line-height: 1.15;
-  overflow-wrap: anywhere;
-}
-
-.ad-stat-label {
-  margin-top: 6px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--muted);
-}
-
-.ad-panels {
-  margin-top: 18px;
-  display: grid;
-  grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-
-.ad-panel {
-  background: var(--cream);
-  border: 1px solid var(--cream-line);
-  border-radius: 6px;
-  padding: 10px 10px 14px;
-  min-width: 0;
-}
-
-.ad-panel-title {
-  margin: 0;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #4a4a4a;
-}
-
-.ad-table-wrap {
-  overflow-x: auto;
-  width: 100%;
-}
-
-.ad-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 14px;
-  font-size: 11px;
-  min-width: 420px;
-}
-
-.ad-table th {
-  text-align: left;
-  font-weight: 500;
-  color: #555;
-  padding: 4px 8px 6px;
-  border-bottom: 1px solid #b9b2a3;
-}
-
-.ad-table td {
-  padding: 12px 8px 8px;
-  border-bottom: 1px solid #b9b2a3;
-  font-weight: 500;
-}
-
-.ad-table td:first-child {
-  max-width: 170px;
-  overflow-wrap: anywhere;
-}
-
-.ad-table tr.filler td { height: 46px; }
-
-.ad-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border-radius: 6px;
-  font-size: 10px;
-  font-weight: 700;
-  white-space: nowrap;
-  box-shadow: 0 1px 2px rgba(0,0,0,.15);
-}
-
-.ad-badge .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-.ad-badge.near {
-  background: #fbe2b0;
-  border: 1px solid #efc77c;
-  color: #222;
-}
-
-.ad-badge.near .dot { background: #f0b93a; }
-
-.ad-badge.full {
-  background: #fff;
-  border: 1px solid var(--red-bright);
-  color: #222;
-}
-
-.ad-badge.full .dot { background: var(--red-bright); }
-
-.ad-badge.empty {
-  background: #e5efd5;
-  border: 1px solid #a9bb78;
-  color: #314920;
-}
-
-.ad-badge.empty .dot { background: #799d46; }
-
-.ad-badge.unknown {
-  background: #eee;
-  border: 1px solid #ccc;
-  color: #555;
-}
-
-.ad-badge.unknown .dot { background: #999; }
-
-.ad-progress-text {
-  margin-top: 14px;
-  font-size: 11.5px;
-  font-weight: 500;
-}
-
-.ad-bar {
-  margin-top: 8px;
-  height: 5px;
-  background: #d9d9d9;
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.ad-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--red-bright);
-  transition: width .3s ease;
-}
-
-.ad-message {
-  margin-top: 14px;
-  padding: 12px;
-  border-radius: 6px;
-  background: #fff0f0;
-  color: #a81b1e;
-  border: 1px solid #e6b0b0;
-  font-size: 12px;
-}
-
-.ad-empty {
-  padding: 20px 8px;
-  text-align: center;
-  color: #666;
-  font-size: 12px;
-}
-
-.ad-updated {
-  margin-top: 7px;
-  color: #777;
-  font-size: 10px;
-}
-
-@media (max-width: 900px) {
-  .ad-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
-  }
-
-  .ad-panels {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@media (max-width: 640px) {
-  .ad-root {
-    padding: 16px 12px 24px;
-  }
-
-  .ad-search-row {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .ad-search { max-width: none; }
-
-  .ad-stats {
-    padding: 10px;
-    gap: 10px;
-  }
-
-  .ad-stat { padding: 12px 10px; }
-
-  .ad-stat-value { font-size: 24px; }
-
-  .ad-stat-label { font-size: 11px; }
-
-  .ad-panel { padding: 12px 10px; }
-}
-
-@media (max-width: 350px) {
-  .ad-stat-value { font-size: 21px; }
-}
-`;
-
-// ==========================================
-// ADMIN DASHBOARD
-// ==========================================
+// ========================================
+// MAIN ADMIN DASHBOARD
+// ========================================
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
 
   const [query, setQuery] = useState("");
+
   const [dashboard, setDashboard] =
     useState<DashboardData | null>(null);
 
@@ -778,7 +550,7 @@ export default function AdminDashboard() {
   const requestId = useRef(0);
 
   // ========================================
-  // FETCH DATA FROM SUPABASE
+  // LOAD DATA FROM SUPABASE
   // ========================================
 
   const loadDashboard = useCallback(async () => {
@@ -787,9 +559,10 @@ export default function AdminDashboard() {
     try {
       setError("");
 
-      // Verify signed-in administrator.
-      const { data: authData, error: authError } =
-        await supabase.auth.getUser();
+      const {
+        data: authData,
+        error: authError,
+      } = await supabase.auth.getUser();
 
       if (authError) throw authError;
 
@@ -799,26 +572,31 @@ export default function AdminDashboard() {
         );
       }
 
-      const { data: profile, error: profileError } =
-        await supabase
-          .from("users")
-          .select("full_name, role, is_active")
-          .eq("user_id", authData.user.id)
-          .maybeSingle();
+      // VERIFY ADMIN
+      const {
+        data: profile,
+        error: profileError,
+      } = await supabase
+        .from("users")
+        .select("full_name, role, is_active")
+        .eq("user_id", authData.user.id)
+        .maybeSingle();
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        throw profileError;
+      }
 
       if (
         !profile ||
         String(profile.role).toLowerCase() !== "admin" ||
-        profile.is_active === false
+        profile.is_active !== true
       ) {
         throw new Error(
           "Administrator access is required."
         );
       }
 
-      // Fetch actual database records.
+      // FETCH SUPABASE TABLES
       const [
         sites,
         reports,
@@ -870,7 +648,9 @@ export default function AdminDashboard() {
         ),
       ]);
 
-      if (currentRequest !== requestId.current) return;
+      if (currentRequest !== requestId.current) {
+        return;
+      }
 
       const nextDashboard = buildDashboard(
         sites,
@@ -885,7 +665,9 @@ export default function AdminDashboard() {
       setDashboard(nextDashboard);
       setNow(Date.now());
     } catch (err) {
-      if (currentRequest !== requestId.current) return;
+      if (currentRequest !== requestId.current) {
+        return;
+      }
 
       console.error(
         "[WasteTrack] Admin dashboard error:",
@@ -905,31 +687,32 @@ export default function AdminDashboard() {
   }, []);
 
   // ========================================
-  // INITIAL LOAD + AUTO REFRESH
+  // INITIAL LOAD + AUTOMATIC UPDATES
   // ========================================
 
   useEffect(() => {
     void loadDashboard();
 
-    // Refresh every minute.
+    // Reload every minute.
     const interval = window.setInterval(() => {
       void loadDashboard();
     }, 60000);
 
-    // Refresh when returning to this tab.
+    // Reload when browser tab receives focus.
     const handleFocus = () => {
       void loadDashboard();
     };
 
     window.addEventListener("focus", handleFocus);
 
-    // Supabase Realtime changes.
-    let refreshTimer: ReturnType<
-      typeof setTimeout
-    > | null = null;
+    // SUPABASE REALTIME
+    let refreshTimer: ReturnType<typeof setTimeout> | null =
+      null;
 
     const onDatabaseChange = () => {
-      if (refreshTimer) clearTimeout(refreshTimer);
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
+      }
 
       refreshTimer = setTimeout(() => {
         void loadDashboard();
@@ -966,55 +749,59 @@ export default function AdminDashboard() {
     return () => {
       requestId.current += 1;
 
-      window.clearInterval(interval);
+      clearInterval(interval);
+
       window.removeEventListener(
         "focus",
         handleFocus
       );
 
-      if (refreshTimer) clearTimeout(refreshTimer);
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
+      }
 
       void supabase.removeChannel(channel);
     };
   }, [loadDashboard]);
 
   // ========================================
-  // DASHBOARD STATISTICS
+  // STATISTICS
   // ========================================
 
-  const stats: Stat[] = [
+  const fullBins = dashboard?.fullBins ?? 0;
+  const nearFullBins = dashboard?.nearFullBins ?? 0;
+  const pendingReports = dashboard?.pendingReports ?? 0;
+
+  const displayValue = (value: number) =>
+    loading && !dashboard ? "—" : String(value);
+
+  const metrics = [
     {
-      value: loading && !dashboard
-        ? "—"
-        : String(dashboard?.fullBins ?? 0),
-      label: "Bins Full",
-      color: "#d0102b",
-      to: "/admin/waste-status?filter=Full",
+      label: "Full bins",
+      value: displayValue(fullBins),
+      detail: "Needs attention",
+      icon: Trash2,
+      tone: "red",
+      route: "/admin/waste-status?filter=Full",
     },
     {
-      value: loading && !dashboard
-        ? "—"
-        : String(dashboard?.nearFullBins ?? 0),
-      label: "Bins Half Full",
-      color: "#f0b93a",
-      to: "/admin/waste-status?filter=Near%20Full",
+      label: "Half-full bins",
+      value: displayValue(nearFullBins),
+      detail: "Monitor waste levels",
+      icon: TrendingUp,
+      tone: "amber",
+      route:
+        "/admin/waste-status?filter=Near%20Full",
     },
     {
-      value: loading && !dashboard
-        ? "—"
-        : String(dashboard?.pendingReports ?? 0),
       label: "Pending reports",
-      color: "#d0102b",
-      to: "/admin/reports",
+      value: displayValue(pendingReports),
+      detail: "Awaiting review",
+      icon: FileText,
+      tone: "blue",
+      route: "/admin/reports",
     },
-    {
-      value: loading && !dashboard
-        ? "—"
-        : `${dashboard?.progress ?? 0}%`,
-      label: "Today's collection progress",
-      color: "#111111",
-    },
-  ];
+  ] as const;
 
   // ========================================
   // SEARCH RECENT REPORTS
@@ -1022,234 +809,438 @@ export default function AdminDashboard() {
 
   const q = query.trim().toLowerCase();
 
-  const reports = (
-    dashboard?.recentReports ?? []
-  )
-    .filter(
-      (report) =>
-        !q ||
-        report.site.toLowerCase().includes(q) ||
-        report.by.toLowerCase().includes(q)
-    )
-    .slice(0, 8);
+  const allReports = dashboard?.recentReports ?? [];
 
-  const progress = dashboard?.progress ?? 0;
-  const collected = dashboard?.collectedToday ?? 0;
-  const totalSites = dashboard?.totalSites ?? 0;
+  const filteredReports = allReports.filter(
+    (report) =>
+      !q ||
+      report.site.toLowerCase().includes(q) ||
+      report.by.toLowerCase().includes(q)
+  );
+
+  const reports = filteredReports.slice(0, 8);
 
   // ========================================
-  // RENDER DASHBOARD
+  // MAIN UI
   // ========================================
 
   return (
-    <div className="ad-root">
-      <style>{css}</style>
-
-      {/* HEADER */}
-      <div className="ad-head">
-        <h1 className="ad-title">Dashboard</h1>
-
-        <button
-          type="button"
-          className="ad-avatar"
-          aria-label="Manage admin account"
-          title={dashboard?.adminName || "Admin account"}
-          onClick={() => navigate("/admin/account")}
-        >
-          {getInitials(
-            dashboard?.adminName || "Administrator"
-          )}
-        </button>
-      </div>
-
-      {/* SEARCH */}
-      <div className="ad-search-row">
-        <div className="ad-overview">
-          Overview for
-          <br />
-          Brgy. San Miguel
-        </div>
-
-        <input
-          className="ad-search"
-          type="search"
-          placeholder="Search sites or reporters..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="Search sites or reporters"
-        />
-      </div>
-
-      {/* DATABASE ERROR */}
-      {error && (
-        <div className="ad-message" role="alert">
-          <strong>Failed to load dashboard.</strong>
-          <div style={{ marginTop: 4 }}>{error}</div>
-
-          <button
-            type="button"
-            onClick={() => void loadDashboard()}
-            style={{
-              marginTop: 10,
-              padding: "6px 12px",
-              borderRadius: 5,
-              border: "1px solid #a81b1e",
-              color: "#a81b1e",
-              background: "#fff",
-              cursor: "pointer",
-            }}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {/* STATISTICS */}
-      <section
-        className="ad-stats"
-        aria-label="Summary"
-        aria-busy={loading}
+    <main
+      className="
+        min-h-[100dvh] w-full
+        bg-[#FFFCF8] text-[#242424]
+        font-['Fira_Sans',Arial,sans-serif]
+      "
+    >
+      <div
+        className="
+          mx-auto w-full max-w-[1600px]
+          px-4 py-6 sm:px-6
+          lg:px-8 lg:py-8
+        "
       >
-        {stats.map((stat) => (
-          <button
-            key={stat.label}
-            type="button"
-            className={`ad-stat${
-              stat.to ? " clickable" : ""
-            }`}
-            onClick={
-              stat.to
-                ? () => navigate(stat.to!)
-                : undefined
-            }
-            disabled={!stat.to}
+        {/* ====================================
+            WELCOME SECTION
+        ==================================== */}
+
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#A81B1E]">
+              Overview
+            </p>
+
+            <h1 className="mt-1 text-[20px] font-extrabold text-[#2C2C2C] sm:text-[24px]">
+              Welcome back,{" "}
+              <span className="text-[#A81B1E]">
+                {dashboard?.adminName || "Administrator"}
+              </span>
+            </h1>
+
+            <p className="mt-1 text-xs text-[#888]">
+              Monitor waste levels and resident reports.
+            </p>
+          </div>
+
+          {/* CONNECTION STATUS */}
+          <div className="inline-flex items-center gap-2 rounded-full border border-[#E0E9D5] bg-white px-3 py-2 text-[11px] text-[#617B3E]">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                error
+                  ? "bg-[#D0102B]"
+                  : loading
+                    ? "animate-pulse bg-[#D8AD45]"
+                    : "bg-[#84A44E]"
+              }`}
+            />
+
+            {error
+              ? "Connection issue"
+              : loading && !dashboard
+                ? "Loading data"
+                : "Dashboard connected"}
+          </div>
+        </div>
+
+        {/* ====================================
+            ERROR MESSAGE
+        ==================================== */}
+
+        {error && (
+          <div
+            role="alert"
+            className="mb-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4"
           >
-            <div
-              className="ad-stat-value"
-              style={{ color: stat.color }}
-            >
-              {stat.value}
+            <AlertCircle
+              size={20}
+              className="mt-0.5 shrink-0 text-[#B5202A]"
+            />
+
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-[#A81B1E]">
+                Failed to load dashboard
+              </p>
+
+              <p className="mt-1 break-words text-xs leading-relaxed text-red-700">
+                {error}
+              </p>
+
+              <button
+                type="button"
+                onClick={() => void loadDashboard()}
+                className="mt-3 rounded-lg bg-[#A81B1E] px-4 py-2 text-xs font-bold text-white hover:bg-[#8F1619]"
+              >
+                Try again
+              </button>
             </div>
+          </div>
+        )}
 
-            <div className="ad-stat-label">
-              {stat.label}
-            </div>
-          </button>
-        ))}
-      </section>
+        {/* ====================================
+            THREE STATISTICS CARDS
+        ==================================== */}
 
-      {/* PANELS */}
-      <div className="ad-panels">
+        <section
+          aria-label="Waste monitoring statistics"
+          aria-busy={loading}
+          className="grid grid-cols-1 gap-4 sm:grid-cols-3"
+        >
+          {metrics.map((metric) => {
+            const Icon = metric.icon;
 
-        {/* RECENT REPORTS */}
-        <section className="ad-panel">
-          <h2 className="ad-panel-title">
+            const tone =
+              metric.tone === "red"
+                ? {
+                    icon:
+                      "bg-[#FCE7E9] text-[#C42A34]",
+                    value: "text-[#B5202A]",
+                    accent: "bg-[#D0102B]",
+                  }
+                : metric.tone === "amber"
+                  ? {
+                      icon:
+                        "bg-[#FFF1D3] text-[#AE801C]",
+                      value: "text-[#A77716]",
+                      accent: "bg-[#E2AC2D]",
+                    }
+                  : {
+                      icon:
+                        "bg-[#EAF0F8] text-[#4F749E]",
+                      value: "text-[#47698E]",
+                      accent: "bg-[#6689B2]",
+                    };
+
+            return (
+              <button
+                key={metric.label}
+                type="button"
+                onClick={() =>
+                  navigate(metric.route)
+                }
+                className="
+                  group relative min-w-0
+                  overflow-hidden rounded-2xl
+                  border border-[#EAE2D7]
+                  bg-white p-5 text-left
+                  shadow-sm transition
+                  hover:-translate-y-0.5
+                  hover:border-[#D9C5B4]
+                  hover:shadow-md
+                "
+              >
+                {/* TOP ACCENT */}
+                <div
+                  className={`absolute left-0 top-0 h-1 w-full ${tone.accent}`}
+                />
+
+                <div className="flex items-start justify-between gap-3">
+                  <div
+                    className={`
+                      flex h-11 w-11
+                      shrink-0 items-center
+                      justify-center rounded-xl
+                      ${tone.icon}
+                    `}
+                  >
+                    <Icon size={21} />
+                  </div>
+
+                  <ArrowUpRight
+                    size={17}
+                    className="text-[#AAA] transition group-hover:text-[#A81B1E]"
+                  />
+                </div>
+
+                <p
+                  className={`mt-5 text-[36px] font-extrabold leading-none tracking-tight ${tone.value}`}
+                >
+                  {metric.value}
+                </p>
+
+                <p className="mt-3 text-[13px] font-bold text-[#2C2C2C]">
+                  {metric.label}
+                </p>
+
+                <p className="mt-1 text-[11px] text-[#999]">
+                  {metric.detail}
+                </p>
+              </button>
+            );
+          })}
+        </section>
+
+        {/* ====================================
             RECENT REPORTS
-          </h2>
+        ==================================== */}
 
-          <div className="ad-table-wrap">
-            <table className="ad-table">
+        <section
+          className="
+            mt-6 min-w-0 overflow-hidden
+            rounded-2xl border
+            border-[#EAE2D7]
+            bg-white shadow-sm
+          "
+        >
+          {/* PANEL HEADER */}
+          <div className="border-b border-[#F0E9E0] px-4 py-5 sm:px-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#F7F0E4] text-[#A81B1E]">
+                  <ClipboardList size={20} />
+                </div>
+
+                <div>
+                  <h2 className="text-[16px] font-extrabold sm:text-[18px]">
+                    Recent reports
+                  </h2>
+
+                  <p className="mt-0.5 text-[11px] text-[#999]">
+                    Latest waste reports
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => navigate("/admin/reports")}
+                className="inline-flex items-center gap-1.5 text-[12px] font-bold text-[#A81B1E] hover:underline"
+              >
+                View all
+                <ArrowUpRight size={15} />
+              </button>
+            </div>
+
+            {/* SEARCH BAR */}
+            <div className="relative mt-5">
+              <Search
+                size={17}
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#A09A91]"
+              />
+
+              <input
+                type="search"
+                value={query}
+                onChange={(event) =>
+                  setQuery(event.target.value)
+                }
+                placeholder="Search site or reporter..."
+                aria-label="Search recent reports"
+                className="
+                  h-11 w-full rounded-xl
+                  border border-[#E4DCD0]
+                  bg-[#FFFCF8]
+                  pl-10 pr-10 text-[12px]
+                  outline-none transition
+                  placeholder:text-[#AAA]
+                  focus:border-[#A5B26B]
+                  focus:ring-2
+                  focus:ring-[#A5B26B]/20
+                "
+              />
+
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear search"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#999] hover:text-[#555]"
+                >
+                  <X size={17} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* ====================================
+              DESKTOP / TABLET TABLE
+          ==================================== */}
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[570px] border-collapse text-left">
               <thead>
-                <tr>
-                  <th>Site</th>
-                  <th>Reported by</th>
-                  <th>Time</th>
-                  <th>Level</th>
+                <tr className="bg-[#FFFCF8] text-[11px] text-[#888]">
+                  <th className="px-5 py-3 font-semibold">
+                    Site
+                  </th>
+
+                  <th className="px-4 py-3 font-semibold">
+                    Reported by
+                  </th>
+
+                  <th className="px-4 py-3 font-semibold">
+                    Time
+                  </th>
+
+                  <th className="px-4 py-3 font-semibold">
+                    Waste level
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
-                {reports.map((report) => {
-                  const badgeClass =
-                    report.level === "Full"
-                      ? "full"
-                      : report.level === "Near Full"
-                        ? "near"
-                        : report.level === "Empty"
-                          ? "empty"
-                          : "unknown";
+                {reports.map((report) => (
+                  <tr
+                    key={report.id}
+                    className="border-t border-[#F1EAE2] transition hover:bg-[#FFFCF8]"
+                  >
+                    <td className="max-w-[240px] px-5 py-4">
+                      <div className="flex items-start gap-2">
+                        <MapPin
+                          size={15}
+                          className="mt-0.5 shrink-0 text-[#A81B1E]"
+                        />
 
-                  return (
-                    <tr key={report.id}>
-                      <td>{report.site}</td>
-
-                      <td>{report.by}</td>
-
-                      <td>
-                        {timeAgo(report.date, now)}
-                      </td>
-
-                      <td>
-                        <span
-                          className={`ad-badge ${badgeClass}`}
-                        >
-                          <span className="dot" />
-                          {report.level}
+                        <span className="break-words text-[12px] font-bold text-[#343434]">
+                          {report.site}
                         </span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-4 text-[12px] text-[#666]">
+                      {report.by}
+                    </td>
+
+                    <td className="px-4 py-4 text-[11px] text-[#888]">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Clock3 size={13} />
+                        {timeAgo(report.date, now)}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-4">
+                      <WasteBadge level={report.level} />
+                    </td>
+                  </tr>
+                ))}
 
                 {reports.length === 0 && (
                   <tr>
                     <td
                       colSpan={4}
-                      className="ad-empty"
+                      className="px-4 py-12 text-center text-xs text-[#999]"
                     >
-                      {loading
-                        ? "Loading recent reports..."
-                        : q
-                          ? "No matching reports found."
-                          : "No reports available."}
+                      {loading && !dashboard ? (
+                        <span className="inline-flex items-center gap-2">
+                          <LoaderCircle
+                            size={15}
+                            className="animate-spin"
+                          />
+                          Loading reports...
+                        </span>
+                      ) : q ? (
+                        "No matching reports found."
+                      ) : (
+                        "No reports available."
+                      )}
                     </td>
-                  </tr>
-                )}
-
-                {reports.length > 0 && (
-                  <tr className="filler">
-                    <td colSpan={4} />
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
-        </section>
 
-        {/* COLLECTION PROGRESS */}
-        <section className="ad-panel">
-          <h2 className="ad-panel-title">
-            COLLECTION PROGRESS
-          </h2>
+          {/* ====================================
+              MOBILE REPORT CARDS
+          ==================================== */}
 
-          <p className="ad-progress-text">
-            {loading && !dashboard
-              ? "Loading collection progress..."
-              : `${collected} of ${totalSites} sites collected today`}
-          </p>
+          <div className="divide-y divide-[#F1EAE2] md:hidden">
+            {reports.map((report) => (
+              <article
+                key={report.id}
+                className="px-4 py-4 sm:px-5"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <MapPin
+                      size={17}
+                      className="mt-0.5 shrink-0 text-[#A81B1E]"
+                    />
 
-          <div
-            className="ad-bar"
-            role="progressbar"
-            aria-label="Today's collection progress"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={progress}
-          >
-            <span
-              style={{
-                width: `${progress}%`,
-              }}
-            />
+                    <p className="break-words text-[13px] font-bold">
+                      {report.site}
+                    </p>
+                  </div>
+
+                  <WasteBadge level={report.level} />
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pl-6 text-[11px] text-[#777]">
+                  <span>By {report.by}</span>
+
+                  <span className="inline-flex items-center gap-1">
+                    <Clock3 size={13} />
+                    {timeAgo(report.date, now)}
+                  </span>
+                </div>
+              </article>
+            ))}
+
+            {reports.length === 0 && (
+              <div className="px-4 py-12 text-center text-xs text-[#999]">
+                {loading && !dashboard
+                  ? "Loading reports..."
+                  : q
+                    ? "No matching reports found."
+                    : "No reports available."}
+              </div>
+            )}
           </div>
 
-          <p className="ad-updated">
-            {loading && !dashboard
-              ? "Connecting to Supabase..."
-              : "Based on today's completed collections"}
-          </p>
+          {/* ====================================
+              REPORTS FOOTER
+          ==================================== */}
+
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#F0E9E0] bg-[#FFFCF8] px-5 py-3">
+            <p className="text-[11px] text-[#999]">
+              Showing {reports.length} of{" "}
+              {filteredReports.length} matching reports
+            </p>
+
+            <p className="text-[10px] text-[#AAA]">
+              Latest first
+            </p>
+          </div>
         </section>
       </div>
-    </div>
+    </main>
   );
 }

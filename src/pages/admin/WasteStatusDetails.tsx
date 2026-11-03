@@ -1,10 +1,5 @@
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   useNavigate,
@@ -12,46 +7,48 @@ import {
   useSearchParams,
 } from "react-router";
 
+import {
+  AlertCircle,
+  ArrowLeft,
+  CalendarDays,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Clock3,
+  ImageOff,
+  LoaderCircle,
+  MapPin,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
+
 import { supabase } from "../../lib/supabase";
 
-// ==========================================
+// ========================================
 // TYPES
-// ==========================================
+// ========================================
 
 type WasteLevel =
-  | "Full"
-  | "Near Full"
   | "Empty"
+  | "Near Full"
+  | "Full"
   | "Not analyzed";
 
-type WasteReport = {
+type Report = {
   report_id: string;
   user_id: string;
   site_id: string | null;
   date_uploaded: string;
   cnn_detection_level: string | null;
-  waste_type: string | null;
   address: string | null;
   site_description: string | null;
 };
 
-type DisposalSite = {
+type Site = {
   site_id: string;
   site_name: string;
   location: string | null;
-};
-
-type WasteImage = {
-  image_id: string;
-  src: string | null;
-  storage_bucket: string | null;
-  storage_path: string | null;
-  created_at: string;
-};
-
-type Collector = {
-  user_id: string;
-  full_name: string | null;
 };
 
 type Schedule = {
@@ -64,22 +61,34 @@ type Schedule = {
   created_at: string;
 };
 
-type Details = {
-  report: WasteReport;
-  siteName: string;
-  locationName: string;
+type Collector = {
+  user_id: string;
+  full_name: string | null;
+  is_active: boolean;
+  collector_status: string | null;
+};
+
+type WasteImage = {
+  src: string | null;
+  storage_bucket: string | null;
+  storage_path: string | null;
+};
+
+type ReportSummary = {
+  report: Report;
   reporter: string;
-  reportPhotoUrl: string;
   currentStatus: string;
   activeSchedule: Schedule | null;
 };
 
+// ========================================
+// CONSTANTS
+// ========================================
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const WASTE_IMAGE_BUCKET = "waste-images";
-
-const DAYS = [
+const WEEKDAYS = [
   "Su",
   "Mo",
   "Tu",
@@ -89,13 +98,15 @@ const DAYS = [
   "Sa",
 ];
 
-// ==========================================
-// DATE HELPERS
-// ==========================================
+const PAGE_SIZE = 500;
 
-function phDateTime(offsetMinutes = 60) {
-  const date = new Date(
-    Date.now() + offsetMinutes * 60000
+// ========================================
+// PHILIPPINE DATE AND TIME
+// ========================================
+
+function phDateTime(minutesAhead = 60) {
+  const value = new Date(
+    Date.now() + minutesAhead * 60_000
   );
 
   const parts = new Intl.DateTimeFormat(
@@ -109,17 +120,31 @@ function phDateTime(offsetMinutes = 60) {
       minute: "2-digit",
       hourCycle: "h23",
     }
-  ).formatToParts(date);
+  ).formatToParts(value);
 
-  const getPart = (type: string) =>
+  const get = (type: string) =>
     parts.find(
       (part) => part.type === type
     )?.value ?? "";
 
   return {
-    date: `${getPart("year")}-${getPart("month")}-${getPart("day")}`,
-    time: `${getPart("hour")}:${getPart("minute")}`,
+    date:
+      `${get("year")}-${get("month")}-${get("day")}`,
+
+    time:
+      `${get("hour")}:${get("minute")}`,
   };
+}
+
+function monthFromDate(value: string) {
+  const [year, month] =
+    value.split("-").map(Number);
+
+  return new Date(
+    year,
+    month - 1,
+    1
+  );
 }
 
 function formatDateTime(value: string) {
@@ -140,7 +165,8 @@ function formatDateTime(value: string) {
 }
 
 function relativeTime(value: string) {
-  const timestamp = new Date(value).getTime();
+  const timestamp =
+    new Date(value).getTime();
 
   if (!Number.isFinite(timestamp)) {
     return "Unknown";
@@ -149,7 +175,7 @@ function relativeTime(value: string) {
   const minutes = Math.max(
     0,
     Math.floor(
-      (Date.now() - timestamp) / 60000
+      (Date.now() - timestamp) / 60_000
     )
   );
 
@@ -161,26 +187,26 @@ function relativeTime(value: string) {
     return `${minutes} min ago`;
   }
 
-  const hours = Math.floor(minutes / 60);
+  const hours = Math.floor(
+    minutes / 60
+  );
 
   if (hours < 24) {
     return `${hours} hr ago`;
   }
 
-  const days = Math.floor(hours / 24);
+  const days = Math.floor(
+    hours / 24
+  );
 
-  return `${days} day${days === 1 ? "" : "s"} ago`;
+  return `${days} day${
+    days === 1 ? "" : "s"
+  } ago`;
 }
 
-function monthFromDate(value: string) {
-  const [year, month] = value.split("-").map(Number);
-
-  return new Date(year, month - 1, 1);
-}
-
-// ==========================================
-// FORMATTERS
-// ==========================================
+// ========================================
+// CNN WASTE CLASSIFICATION
+// ========================================
 
 function levelOf(
   value: string | null
@@ -188,26 +214,26 @@ function levelOf(
   const level = (value ?? "")
     .trim()
     .toUpperCase()
-    .replace(/_/g, " ");
+    .replace(/[_-]/g, " ");
 
   if (
-    level === "FULL" ||
-    level === "HIGH"
+    ["FULL", "HIGH"].includes(level)
   ) {
     return "Full";
   }
 
   if (
-    level === "NEAR FULL" ||
-    level === "MEDIUM" ||
-    level === "HALF FULL"
+    [
+      "MEDIUM",
+      "NEAR FULL",
+      "HALF FULL",
+    ].includes(level)
   ) {
     return "Near Full";
   }
 
   if (
-    level === "EMPTY" ||
-    level === "LOW"
+    ["EMPTY", "LOW"].includes(level)
   ) {
     return "Empty";
   }
@@ -215,58 +241,51 @@ function levelOf(
   return "Not analyzed";
 }
 
-function formatWasteTypes(value: string | null) {
-  if (!value?.trim()) {
-    return ["Not specified"];
+function levelStyle(
+  value: WasteLevel
+): string {
+  if (value === "Full") {
+    return (
+      "bg-[#FFF0F1] " +
+      "text-[#B82030] " +
+      "border-[#F2C9CE]"
+    );
   }
 
-  return value
-    .split(/[,;]/)
-    .map((type) => type.trim())
-    .filter(Boolean);
-}
-
-function getInitials(value: string) {
-  const words = value
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-
-  if (words.length === 0) {
-    return "AD";
+  if (value === "Near Full") {
+    return (
+      "bg-[#FFF6DF] " +
+      "text-[#9A6A08] " +
+      "border-[#F0DCAD]"
+    );
   }
 
-  if (words.length === 1) {
-    return words[0]
-      .slice(0, 2)
-      .toUpperCase();
+  if (value === "Empty") {
+    return (
+      "bg-[#F1F8E8] " +
+      "text-[#597B31] " +
+      "border-[#D4E4BE]"
+    );
   }
 
   return (
-    words[0][0] +
-    words[words.length - 1][0]
-  ).toUpperCase();
+    "bg-[#F3F3F3] " +
+    "text-[#666] " +
+    "border-[#DDD]"
+  );
 }
 
-// ==========================================
-// LOAD REPORT WASTE PHOTO
-// ==========================================
+// ========================================
+// LOAD WASTE REPORT PHOTO
+// ========================================
 
-// Source: public.waste_images
-// Only uses the photo submitted by the resident.
-
-async function getReportWastePhoto(
+async function getReportPhoto(
   image: WasteImage | null
 ): Promise<string> {
   if (!image) {
     return "";
   }
 
-  const bucket =
-    image.storage_bucket ||
-    WASTE_IMAGE_BUCKET;
-
-  // If the photo is already a full URL.
   if (
     image.src &&
     /^https?:\/\//i.test(image.src)
@@ -274,39 +293,47 @@ async function getReportWastePhoto(
     return image.src;
   }
 
-  const rawPath =
-    image.storage_path ||
-    image.src;
+  const bucket =
+    image.storage_bucket ||
+    "waste-images";
 
-  if (!rawPath?.trim()) {
+  let path =
+    image.storage_path ||
+    image.src ||
+    "";
+
+  if (!path) {
     return "";
   }
 
-  const path = rawPath.startsWith(
-    `${bucket}/`
-  )
-    ? rawPath.slice(bucket.length + 1)
-    : rawPath;
+  if (
+    path.startsWith(`${bucket}/`)
+  ) {
+    path = path.slice(
+      bucket.length + 1
+    );
+  }
 
   const {
     data,
     error,
   } = await supabase.storage
     .from(bucket)
-    .createSignedUrl(path, 3600);
+    .createSignedUrl(
+      path,
+      3600
+    );
 
   if (error) {
-    throw new Error(
-      `Unable to load Report Waste photo: ${error.message}`
-    );
+    throw error;
   }
 
-  return data?.signedUrl ?? "";
+  return data?.signedUrl || "";
 }
 
-// ==========================================
-// CALENDAR
-// ==========================================
+// ========================================
+// CALENDAR COMPONENT
+// ========================================
 
 function MiniCalendar({
   date,
@@ -317,52 +344,64 @@ function MiniCalendar({
 }: {
   date: string;
   month: Date;
-  setMonth: (value: Date) => void;
-  onSelect: (value: string) => void;
+  setMonth: (date: Date) => void;
+  onSelect: (date: string) => void;
   disabled: boolean;
 }) {
   const year = month.getFullYear();
-  const monthNumber = month.getMonth();
 
-  const firstDay = new Date(
-    year,
-    monthNumber,
-    1
-  ).getDay();
+  const monthNumber =
+    month.getMonth();
 
-  const totalDays = new Date(
-    year,
-    monthNumber + 1,
-    0
-  ).getDate();
+  const leading =
+    new Date(
+      year,
+      monthNumber,
+      1
+    ).getDay();
 
-  const cells: Array<number | null> = [
+  const days =
+    new Date(
+      year,
+      monthNumber + 1,
+      0
+    ).getDate();
+
+  const cells: (number | null)[] = [
     ...Array<number | null>(
-      firstDay
+      leading
     ).fill(null),
 
     ...Array.from(
-      { length: totalDays },
+      { length: days },
       (_, index) => index + 1
     ),
   ];
 
-  const monthLabel = month.toLocaleDateString(
-    "en-US",
-    {
-      month: "long",
-      year: "numeric",
-    }
-  );
+  const today =
+    phDateTime(0).date;
 
   return (
-    <div>
-      <div className="wd-cal-head">
+    <div
+      className="
+        rounded-2xl border
+        border-[#EBE4D9]
+        bg-[#FFFCF8]
+        p-3 sm:p-4
+      "
+    >
+      {/* CALENDAR HEADER */}
+
+      <div
+        className="
+          mb-4 flex items-center
+          justify-between gap-2
+        "
+      >
         <button
           type="button"
-          className="wd-cal-nav"
-          aria-label="Previous month"
           disabled={disabled}
+          aria-label="Previous month"
           onClick={() =>
             setMonth(
               new Date(
@@ -372,19 +411,39 @@ function MiniCalendar({
               )
             )
           }
+          className="
+            grid h-9 w-9
+            place-items-center
+            rounded-lg
+            bg-white
+            text-[#555]
+            hover:bg-[#F0E8DC]
+            disabled:opacity-40
+          "
         >
-          ‹
+          <ChevronLeft size={18} />
         </button>
 
-        <span className="wd-cal-month">
-          {monthLabel}
-        </span>
+        <strong
+          className="
+            text-[13px]
+            font-bold
+            text-[#343434]
+          "
+        >
+          {month.toLocaleDateString(
+            "en-US",
+            {
+              month: "long",
+              year: "numeric",
+            }
+          )}
+        </strong>
 
         <button
           type="button"
-          className="wd-cal-nav"
-          aria-label="Next month"
           disabled={disabled}
+          aria-label="Next month"
           onClick={() =>
             setMonth(
               new Date(
@@ -394,27 +453,46 @@ function MiniCalendar({
               )
             )
           }
+          className="
+            grid h-9 w-9
+            place-items-center
+            rounded-lg
+            bg-white
+            text-[#555]
+            hover:bg-[#F0E8DC]
+            disabled:opacity-40
+          "
         >
-          ›
+          <ChevronRight size={18} />
         </button>
       </div>
 
-      <div className="wd-cal-grid">
-        {DAYS.map((day) => (
-          <div
+      {/* CALENDAR DAYS */}
+
+      <div
+        className="
+          grid grid-cols-7
+          gap-1 text-center
+        "
+      >
+        {WEEKDAYS.map((day) => (
+          <span
             key={day}
-            className="wd-cal-dow"
+            className="
+              py-1 text-[10px]
+              font-bold
+              text-[#999]
+            "
           >
             {day}
-          </div>
+          </span>
         ))}
 
         {cells.map((day, index) => {
           if (day === null) {
             return (
               <span
-                key={`empty-${index}`}
-                className="wd-cal-day muted"
+                key={`blank-${index}`}
               />
             );
           }
@@ -426,21 +504,35 @@ function MiniCalendar({
               day
             ).padStart(2, "0")}`;
 
+          const isSelected =
+            date === value;
+
           return (
             <button
               key={value}
               type="button"
-              aria-label={value}
-              aria-pressed={date === value}
-              disabled={disabled}
-              className={`wd-cal-day${
-                date === value
-                  ? " selected"
-                  : ""
-              }`}
+              aria-label={`Select ${value}`}
+              aria-pressed={isSelected}
+              disabled={
+                disabled ||
+                value < today
+              }
               onClick={() =>
                 onSelect(value)
               }
+              className={`
+                aspect-square
+                rounded-lg
+                text-[11px]
+                font-semibold
+                transition
+                sm:text-[12px]
+                ${
+                  isSelected
+                    ? "bg-[#A81B1E] text-white shadow-sm"
+                    : "text-[#555] hover:bg-[#F4E8E5] disabled:cursor-not-allowed disabled:text-[#C7C0B6] disabled:hover:bg-transparent"
+                }
+              `}
             >
               {day}
             </button>
@@ -451,558 +543,195 @@ function MiniCalendar({
   );
 }
 
-// ==========================================
-// RESPONSIVE CSS
-// ==========================================
-
-const css = `
-.wd-root,
-.wd-root * {
-  box-sizing: border-box;
-}
-
-.wd-root {
-  --red: #a81b1e;
-  --red-bright: #d0102b;
-  --olive: #a5b26b;
-  --cream: #f7f0e4;
-  --cream-line: #d9cfbd;
-  --ink: #1b1b1b;
-
-  min-height: 100dvh;
-  width: 100%;
-  background: #fff;
-  color: var(--ink);
-
-  font-family:
-    "Fira Sans",
-    "Segoe UI",
-    Roboto,
-    Arial,
-    sans-serif;
-}
-
-/* HEADER */
-
-.wd-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-
-  padding: 16px 20px 12px;
-  border-bottom: 5px solid var(--olive);
-}
-
-.wd-back {
-  padding: 0;
-  margin-bottom: 6px;
-  border: none;
-  background: transparent;
-  color: var(--red-bright);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.wd-back:hover {
-  text-decoration: underline;
-}
-
-.wd-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-
-.wd-sub {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: #666;
-}
-
-.wd-avatar {
-  width: 38px;
-  height: 30px;
-  flex-shrink: 0;
-
-  display: grid;
-  place-items: center;
-
-  border: none;
-  border-radius: 8px;
-  background: #f8ced4;
-  color: var(--red-bright);
-
-  font-size: 16px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-/* MAIN TWO-COLUMN LAYOUT */
-
-.wd-body {
-  display: grid;
-  grid-template-columns:
-    minmax(0, 1.3fr)
-    minmax(0, 1fr);
-
-  align-items: start;
-  gap: 16px;
-  padding: 18px 20px 28px;
-}
-
-.wd-left {
-  min-width: 0;
-  width: 100%;
-}
-
-/* ======================================== */
-/* REPORT WASTE PHOTO - NO CROPPING */
-/* ======================================== */
-
-.wd-photo {
-  width: 100%;
-
-  /* Remove fixed sizing */
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-  aspect-ratio: auto !important;
-
-  display: block;
-
-  background: var(--cream);
-  border: 1px solid var(--cream-line);
-  border-radius: 8px;
-  overflow: hidden;
-
-  margin-bottom: 14px;
-}
-
-/*
-  IMPORTANT:
-  width: 100% + height: auto allows the
-  entire original photo to remain visible.
-
-  Do NOT use object-fit: cover because it
-  cuts off the bottom of portrait photos.
-*/
-
-.wd-photo img {
-  display: block;
-
-  width: 100% !important;
-  max-width: 100% !important;
-
-  height: auto !important;
-  max-height: none !important;
-
-  aspect-ratio: auto !important;
-
-  object-fit: contain !important;
-  object-position: center !important;
-}
-
-.wd-photo-placeholder {
-  display: block;
-  padding: 32px 16px;
-  font-size: 12px;
-  color: #777;
-  text-align: center;
-}
-
-/* CNN RESULT */
-
-.wd-result-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.wd-result-label {
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.wd-result-badge {
-  display: inline-block;
-  padding: 5px 13px;
-  border-radius: 6px;
-
-  color: white;
-  background: var(--red-bright);
-
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.wd-result-badge.near {
-  background: #d89616;
-}
-
-.wd-result-badge.empty {
-  background: #638b37;
-}
-
-.wd-result-badge.unknown {
-  background: #777;
-}
-
-/* WASTE TYPE / SITE DETAILS */
-
-.wd-block {
-  margin-bottom: 18px;
-}
-
-.wd-block-title {
-  margin: 0 0 8px;
-
-  font-size: 11px;
-  font-weight: 700;
-
-  color: #666;
-  letter-spacing: 0.02em;
-}
-
-.wd-chip {
-  display: inline-block;
-
-  padding: 4px 12px;
-  margin: 0 6px 6px 0;
-
-  border-radius: 6px;
-  border: 1px solid #efc77c;
-
-  background: #fbe2b0;
-  color: #333;
-
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.wd-fact {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 9px;
-  font-size: 13px;
-}
-
-.wd-fact-label {
-  min-width: 130px;
-  color: #666;
-}
-
-.wd-fact-value {
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-/* RIGHT PANEL */
-
-.wd-side-panel {
-  min-width: 0;
-  padding: 14px;
-
-  background: var(--cream);
-  border: 1px solid var(--cream-line);
-  border-radius: 8px;
-}
-
-/* CALENDAR */
-
-.wd-cal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.wd-cal-nav {
-  padding: 2px 8px;
-  border: none;
-  background: transparent;
-  font-size: 21px;
-  cursor: pointer;
-}
-
-.wd-cal-nav:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
-
-.wd-cal-month {
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.wd-cal-grid {
-  display: grid;
-  grid-template-columns:
-    repeat(7, minmax(0, 1fr));
-
-  gap: 3px;
-  text-align: center;
-}
-
-.wd-cal-dow {
-  padding-bottom: 4px;
-  color: #777;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.wd-cal-day {
-  padding: 7px 0;
-  border: none;
-  border-radius: 5px;
-
-  background: transparent;
-  color: var(--ink);
-
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.wd-cal-day.selected {
-  background: var(--red-bright);
-  color: white;
-  font-weight: 700;
-}
-
-.wd-cal-day:disabled {
-  cursor: default;
-}
-
-/* FORM */
-
-.wd-datetime {
-  display: flex;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.wd-field {
-  flex: 1;
-  min-width: 0;
-}
-
-.wd-field label {
-  display: block;
-  margin-bottom: 5px;
-
-  color: #666;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.wd-field input,
-.wd-field select {
-  display: block;
-  width: 100%;
-  min-width: 0;
-
-  padding: 8px;
-  border: 1px solid var(--cream-line);
-  border-radius: 5px;
-
-  background: white;
-  font: inherit;
-  font-size: 12px;
-}
-
-/* APPROVE BUTTON */
-
-.wd-approve {
-  width: 100%;
-  margin-top: 16px;
-  padding: 11px;
-
-  border: none;
-  border-radius: 6px;
-
-  background: var(--red);
-  color: #fff;
-
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-
-  cursor: pointer;
-}
-
-.wd-approve:hover:not(:disabled) {
-  background: #8f1619;
-}
-
-.wd-approve:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-/* MESSAGES */
-
-.wd-error {
-  margin: 12px 0;
-  color: #a81b1e;
-  font-size: 12px;
-}
-
-.wd-confirm {
-  margin-top: 12px;
-  color: #2f6b2f;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.wd-note {
-  margin-top: 10px;
-  color: #666;
-  font-size: 11px;
-}
-
-/* TABLET AND MOBILE */
-
-@media (max-width: 760px) {
-  .wd-head {
-    padding: 14px;
-  }
-
-  .wd-body {
-    grid-template-columns: minmax(0, 1fr);
-    padding: 14px;
-  }
-
-  .wd-photo {
-    width: 100%;
-
-    /* Keep original photo height */
-    height: auto !important;
-    aspect-ratio: auto !important;
-    min-height: 0 !important;
-  }
-
-  .wd-photo img {
-    width: 100% !important;
-    height: auto !important;
-    object-fit: contain !important;
-  }
-}
-
-@media (max-width: 380px) {
-  .wd-title {
-    font-size: 18px;
-  }
-
-  .wd-datetime {
-    flex-direction: column;
-  }
-
-  .wd-fact {
-    flex-direction: column;
-    gap: 2px;
-  }
-}
+// ========================================
+// SHARED INPUT STYLE
+// ========================================
+
+const fieldClass = `
+  w-full min-w-0
+  rounded-xl border
+  border-[#DDD5C8]
+  bg-white
+  px-3 py-3
+  text-[12px]
+  text-[#333]
+  outline-none
+  transition
+  focus:border-[#A5B26B]
+  focus:ring-2
+  focus:ring-[#A5B26B]/20
+  disabled:cursor-not-allowed
+  disabled:bg-[#F5F1EA]
+  disabled:text-[#888]
 `;
 
-// ==========================================
+// ========================================
 // MAIN COMPONENT
-// ==========================================
+// ========================================
 
 export default function WasteStatusDetails() {
   const navigate = useNavigate();
 
-  const { siteId } =
-    useParams<{ siteId: string }>();
+  const {
+    siteId: routeId,
+  } = useParams<{
+    siteId: string;
+  }>();
 
-  const [searchParams] = useSearchParams();
+  const [searchParams] =
+    useSearchParams();
 
+  // Supports both site IDs and report IDs.
   const targetId =
+    routeId ||
+    searchParams.get("siteId") ||
     searchParams.get("reportId") ||
-    siteId ||
     "";
+
+  const requestedReportId =
+    searchParams.get("reportId");
 
   const initial = useMemo(
     () => phDateTime(),
     []
   );
 
-  const [date, setDate] = useState(
-    initial.date
-  );
+  // ========================================
+  // SCHEDULING STATES
+  // ========================================
 
-  const [time, setTime] = useState(
-    initial.time
-  );
+  const [date, setDate] =
+    useState(initial.date);
 
-  const [month, setMonth] = useState(
-    () => monthFromDate(initial.date)
-  );
+  const [time, setTime] =
+    useState(initial.time);
+
+  const [month, setMonth] =
+    useState(
+      () =>
+        monthFromDate(
+          initial.date
+        )
+    );
 
   const [
     selectedCollectorId,
     setSelectedCollectorId,
   ] = useState("");
 
-  const [collectors, setCollectors] =
-    useState<Collector[]>([]);
-
-  const [adminName, setAdminName] =
-    useState("Administrator");
-
-  const [details, setDetails] =
-    useState<Details | null>(null);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [saving, setSaving] =
-    useState(false);
-
-  const [error, setError] =
-    useState("");
-
-  const [photoError, setPhotoError] =
-    useState("");
-
-  const [imageFailed, setImageFailed] =
-    useState(false);
-
-  const [saveError, setSaveError] =
-    useState("");
-
-  const [confirmation, setConfirmation] =
-    useState("");
-
-  const [refreshKey, setRefreshKey] =
-    useState(0);
+  const [
+    collectors,
+    setCollectors,
+  ] = useState<Collector[]>([]);
 
   // ========================================
-  // LOAD DATA FROM SUPABASE
+  // SITE AND REPORT STATES
   // ========================================
 
-  const fetchDetails = useCallback(
-    async (isActive: () => boolean) => {
+  const [site, setSite] =
+    useState<Site | null>(null);
+
+  const [reports, setReports] =
+    useState<ReportSummary[]>([]);
+
+  const [
+    selectedReportId,
+    setSelectedReportId,
+  ] = useState<string | null>(
+    null
+  );
+
+  const [
+    reportSearch,
+    setReportSearch,
+  ] = useState("");
+
+  // ========================================
+  // PHOTO STATES
+  // ========================================
+
+  const [
+    reportPhotoUrl,
+    setReportPhotoUrl,
+  ] = useState("");
+
+  const [
+    photoError,
+    setPhotoError,
+  ] = useState("");
+
+  const [
+    imageFailed,
+    setImageFailed,
+  ] = useState(false);
+
+  // ========================================
+  // LOADING AND ERRORS
+  // ========================================
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+
+  const [
+    photoLoading,
+    setPhotoLoading,
+  ] = useState(false);
+
+  const [
+    saving,
+    setSaving,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
+
+  const [
+    saveError,
+    setSaveError,
+  ] = useState("");
+
+  const [
+    confirmation,
+    setConfirmation,
+  ] = useState("");
+
+  const [
+    refreshKey,
+    setRefreshKey,
+  ] = useState(0);
+
+  // ========================================
+  // LOAD SITE + REPORTS + COLLECTORS
+  // ========================================
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadAllReports() {
       setLoading(true);
       setError("");
-      setPhotoError("");
-      setImageFailed(false);
+      setReports([]);
+      setSite(null);
 
       try {
+        // ==================================
+        // VALIDATE ID
+        // ==================================
+
         if (!UUID_RE.test(targetId)) {
           throw new Error(
-            "A valid report or disposal-site UUID is required."
+            "A valid disposal site ID or report ID (UUID) is required."
           );
         }
 
-        // STEP 1: AUTHENTICATE USER
+        // ==================================
+        // VERIFY SIGNED-IN ADMIN
+        // ==================================
+
         const {
           data: authData,
           error: authError,
@@ -1018,13 +747,14 @@ export default function WasteStatusDetails() {
           );
         }
 
-        // STEP 2: VERIFY ADMIN
         const {
           data: profile,
           error: profileError,
         } = await supabase
           .from("users")
-          .select("full_name,role,is_active")
+          .select(
+            "role,is_active"
+          )
           .eq(
             "user_id",
             authData.user.id
@@ -1039,338 +769,756 @@ export default function WasteStatusDetails() {
           !profile ||
           String(profile.role).toLowerCase() !==
             "admin" ||
-          profile.is_active === false
+          profile.is_active !== true
         ) {
           throw new Error(
-            "Administrator access is required."
+            "Only an active administrator can review reports."
           );
         }
 
-        // STEP 3: FETCH WASTE REPORT
-        const reportColumns = `
-          report_id,
-          user_id,
-          site_id,
-          date_uploaded,
-          cnn_detection_level,
-          waste_type,
-          address,
-          site_description
-        `;
+        // ==================================
+        // FIND SITE
+        // ==================================
 
         const {
-          data: directReport,
-          error: directError,
+          data: siteData,
+          error: siteError,
         } = await supabase
-          .from("waste_reports")
-          .select(reportColumns)
-          .eq("report_id", targetId)
+          .from("disposal_sites")
+          .select(
+            "site_id,site_name,location"
+          )
+          .eq(
+            "site_id",
+            targetId
+          )
           .maybeSingle();
 
-        if (directError) {
-          throw directError;
+        if (siteError) {
+          throw siteError;
         }
 
-        let foundReport = directReport;
+        let matchedSite =
+          (siteData as Site | null) ??
+          null;
 
-        // If the URL contains a site UUID,
-        // retrieve the latest report.
-        if (!foundReport) {
+        let linkedReport:
+          Report | null = null;
+
+        // No waste_type field needed.
+        const reportColumns = [
+          "report_id",
+          "user_id",
+          "site_id",
+          "date_uploaded",
+          "cnn_detection_level",
+          "address",
+          "site_description",
+        ].join(",");
+
+        // ==================================
+        // SUPPORT REPORT ID LINKS
+        // ==================================
+
+        if (!matchedSite) {
           const {
-            data: latestReport,
-            error: latestError,
+            data,
+            error: reportError,
           } = await supabase
             .from("waste_reports")
             .select(reportColumns)
-            .eq("site_id", targetId)
-            .order("date_uploaded", {
-              ascending: false,
-            })
-            .limit(1)
+            .eq(
+              "report_id",
+              targetId
+            )
             .maybeSingle();
 
-          if (latestError) {
-            throw latestError;
+          if (reportError) {
+            throw reportError;
           }
 
-          foundReport = latestReport;
+          linkedReport =
+            (data as unknown as Report | null) ??
+            null;
+
+          if (!linkedReport) {
+            throw new Error(
+              "No disposal site or report found for the supplied ID."
+            );
+          }
+
+          if (
+            linkedReport.site_id
+          ) {
+            const {
+              data: foundSite,
+              error: linkedSiteError,
+            } = await supabase
+              .from("disposal_sites")
+              .select(
+                "site_id,site_name,location"
+              )
+              .eq(
+                "site_id",
+                linkedReport.site_id
+              )
+              .maybeSingle();
+
+            if (linkedSiteError) {
+              throw linkedSiteError;
+            }
+
+            matchedSite =
+              (foundSite as Site | null) ??
+              null;
+          }
         }
 
-        if (!foundReport) {
-          throw new Error(
-            "No waste report was found."
+        // ==================================
+        // LOAD REPORTS FOR SITE
+        // ==================================
+
+        const resolvedSiteId =
+          matchedSite?.site_id ||
+          linkedReport?.site_id ||
+          null;
+
+        const allReports:
+          Report[] = [];
+
+        if (resolvedSiteId) {
+          for (
+            let offset = 0;
+            ;
+            offset += PAGE_SIZE
+          ) {
+            const {
+              data,
+              error: pageError,
+            } = await supabase
+              .from("waste_reports")
+              .select(reportColumns)
+              .eq(
+                "site_id",
+                resolvedSiteId
+              )
+              .order(
+                "date_uploaded",
+                {
+                  ascending: false,
+                }
+              )
+              .order(
+                "report_id",
+                {
+                  ascending: false,
+                }
+              )
+              .range(
+                offset,
+                offset + PAGE_SIZE - 1
+              );
+
+            if (pageError) {
+              throw pageError;
+            }
+
+            const page =
+              (data ?? []) as unknown as Report[];
+
+            allReports.push(...page);
+
+            if (
+              page.length <
+              PAGE_SIZE
+            ) {
+              break;
+            }
+          }
+        } else if (linkedReport) {
+          allReports.push(
+            linkedReport
           );
         }
 
-        const report =
-          foundReport as WasteReport;
+        // ==================================
+        // GET REPORTER AND REPORT IDS
+        // ==================================
 
-        // STEP 4: FETCH RELATED RECORDS
-        const [
-          siteResult,
-          reporterResult,
-          imageResult,
-          scheduleResult,
-          statusResult,
-          collectorResult,
-        ] = await Promise.all([
-          report.site_id
-            ? supabase
-                .from("disposal_sites")
-                .select(
-                  "site_id,site_name,location"
-                )
-                .eq(
-                  "site_id",
-                  report.site_id
-                )
-                .maybeSingle()
-            : Promise.resolve({
-                data: null,
-                error: null,
-              }),
+        const reporterIds = [
+          ...new Set(
+            allReports.map(
+              (report) =>
+                report.user_id
+            )
+          ),
+        ];
 
-          supabase
+        const reportIds =
+          allReports.map(
+            (report) =>
+              report.report_id
+          );
+
+        const reporterNames =
+          new Map<string, string>();
+
+        const activeSchedules =
+          new Map<string, Schedule>();
+
+        const latestStatuses =
+          new Map<string, string>();
+
+        // ==================================
+        // FETCH REPORTER NAMES
+        // ==================================
+
+        for (
+          let offset = 0;
+          offset < reporterIds.length;
+          offset += 100
+        ) {
+          const {
+            data,
+            error: namesError,
+          } = await supabase
             .from("users")
-            .select("full_name")
-            .eq(
+            .select(
+              "user_id,full_name"
+            )
+            .in(
               "user_id",
-              report.user_id
-            )
-            .maybeSingle(),
-
-          // Only the original Report Waste photo.
-          supabase
-            .from("waste_images")
-            .select(`
-              image_id,
-              src,
-              storage_bucket,
-              storage_path,
-              created_at
-            `)
-            .eq(
-              "report_id",
-              report.report_id
-            )
-            .order("created_at", {
-              ascending: false,
-            })
-            .limit(1)
-            .maybeSingle(),
-
-          supabase
-            .from("schedules")
-            .select(`
-              schedule_id,
-              source_report_id,
-              assigned_collector_id,
-              date,
-              collection_time,
-              status,
-              created_at
-            `)
-            .eq(
-              "source_report_id",
-              report.report_id
-            )
-            .order("created_at", {
-              ascending: false,
-            }),
-
-          supabase
-            .from("status")
-            .select("status,created_at")
-            .eq(
-              "report_id",
-              report.report_id
-            )
-            .order("created_at", {
-              ascending: false,
-            })
-            .limit(1)
-            .maybeSingle(),
-
-          supabase
-            .from("users")
-            .select("user_id,full_name")
-            .eq("role", "collector")
-            .eq("is_active", true)
-            .order("full_name", {
-              ascending: true,
-            }),
-        ]);
-
-        for (const result of [
-          siteResult,
-          reporterResult,
-          imageResult,
-          scheduleResult,
-          statusResult,
-          collectorResult,
-        ]) {
-          if (result.error) {
-            throw result.error;
-          }
-        }
-
-        const site =
-          siteResult.data as DisposalSite | null;
-
-        const schedules =
-          (scheduleResult.data ?? []) as Schedule[];
-
-        const activeSchedule =
-          schedules.find(
-            (schedule) =>
-              schedule.status.toLowerCase() !==
-              "cancelled"
-          ) ?? null;
-
-        // STEP 5: GET ORIGINAL IMAGE
-        let reportPhotoUrl = "";
-        let imageErrorMessage = "";
-
-        try {
-          reportPhotoUrl =
-            await getReportWastePhoto(
-              imageResult.data as WasteImage | null
+              reporterIds.slice(
+                offset,
+                offset + 100
+              )
             );
 
-          if (!reportPhotoUrl) {
-            imageErrorMessage =
-              "Report Waste photo unavailable.";
+          if (namesError) {
+            throw namesError;
           }
-        } catch (cause) {
-          imageErrorMessage =
-            cause instanceof Error
-              ? cause.message
-              : "Unable to load the photo.";
+
+          for (
+            const row of data ?? []
+          ) {
+            reporterNames.set(
+              row.user_id,
+              row.full_name ||
+                "Unknown resident"
+            );
+          }
         }
 
-        if (!isActive()) {
+        // ==================================
+        // FETCH SCHEDULES AND STATUSES
+        // ==================================
+
+        for (
+          let offset = 0;
+          offset < reportIds.length;
+          offset += 100
+        ) {
+          const ids =
+            reportIds.slice(
+              offset,
+              offset + 100
+            );
+
+          const [
+            scheduleResult,
+            statusResult,
+          ] = await Promise.all([
+            supabase
+              .from("schedules")
+              .select(
+                [
+                  "schedule_id",
+                  "source_report_id",
+                  "assigned_collector_id",
+                  "date",
+                  "collection_time",
+                  "status",
+                  "created_at",
+                ].join(",")
+              )
+              .in(
+                "source_report_id",
+                ids
+              )
+              .order(
+                "created_at",
+                {
+                  ascending: false,
+                }
+              ),
+
+            supabase
+              .from("status")
+              .select(
+                "report_id,status,created_at"
+              )
+              .in(
+                "report_id",
+                ids
+              )
+              .order(
+                "created_at",
+                {
+                  ascending: false,
+                }
+              ),
+          ]);
+
+          if (scheduleResult.error) {
+            throw scheduleResult.error;
+          }
+
+          if (statusResult.error) {
+            throw statusResult.error;
+          }
+
+          // Latest active schedule per report.
+          for (
+            const row of (
+              scheduleResult.data ??
+              []
+            ) as unknown as Schedule[]
+          ) {
+            if (
+              row.source_report_id &&
+              ![
+                "cancelled",
+                "canceled",
+              ].includes(
+                row.status?.toLowerCase()
+              ) &&
+              !activeSchedules.has(
+                row.source_report_id
+              )
+            ) {
+              activeSchedules.set(
+                row.source_report_id,
+                row
+              );
+            }
+          }
+
+          // Latest status per report.
+          for (
+            const row of
+            statusResult.data ?? []
+          ) {
+            if (
+              !latestStatuses.has(
+                row.report_id
+              )
+            ) {
+              latestStatuses.set(
+                row.report_id,
+                row.status
+              );
+            }
+          }
+        }
+
+        // ==================================
+        // FETCH COLLECTORS
+        // ==================================
+
+        const {
+          data: collectorData,
+          error: collectorError,
+        } = await supabase
+          .from("users")
+          .select(
+            "user_id,full_name,is_active,collector_status"
+          )
+          .eq(
+            "role",
+            "collector"
+          )
+          .order(
+            "full_name",
+            {
+              ascending: true,
+            }
+          );
+
+        if (collectorError) {
+          throw collectorError;
+        }
+
+        // ==================================
+        // BUILD REPORT SUMMARIES
+        // ==================================
+
+        const summaries:
+          ReportSummary[] =
+          allReports.map(
+            (report) => ({
+              report,
+
+              reporter:
+                reporterNames.get(
+                  report.user_id
+                ) ||
+                "Unknown resident",
+
+              currentStatus:
+                latestStatuses.get(
+                  report.report_id
+                ) ||
+                "Pending",
+
+              activeSchedule:
+                activeSchedules.get(
+                  report.report_id
+                ) ||
+                null,
+            })
+          );
+
+        if (!active) {
           return;
         }
 
-        // STEP 6: DISPLAY DATA
-        setAdminName(
-          profile.full_name ||
-          "Administrator"
-        );
+        // ==================================
+        // UPDATE STATES
+        // ==================================
+
+        setSite(matchedSite);
 
         setCollectors(
-          (collectorResult.data ?? []) as Collector[]
+          (collectorData ??
+            []) as Collector[]
         );
 
-        setDetails({
-          report,
+        setReports(summaries);
 
-          siteName:
-            site?.site_name ||
-            report.site_description ||
-            "Unregistered site",
+        setSelectedReportId(
+          (previous) => {
+            if (
+              previous &&
+              summaries.some(
+                (summary) =>
+                  summary.report.report_id ===
+                  previous
+              )
+            ) {
+              return previous;
+            }
 
-          locationName:
-            site?.location ||
-            report.address ||
-            "Not provided",
+            if (
+              requestedReportId &&
+              summaries.some(
+                (summary) =>
+                  summary.report.report_id ===
+                  requestedReportId
+              )
+            ) {
+              return requestedReportId;
+            }
 
-          reporter:
-            reporterResult.data?.full_name ||
-            "Unknown reporter",
+            if (
+              linkedReport &&
+              summaries.some(
+                (summary) =>
+                  summary.report.report_id ===
+                  linkedReport.report_id
+              )
+            ) {
+              return linkedReport.report_id;
+            }
 
-          reportPhotoUrl,
-
-          currentStatus:
-            statusResult.data?.status ||
-            "Not set",
-
-          activeSchedule,
-        });
-
-        setPhotoError(imageErrorMessage);
-
-        if (activeSchedule) {
-          setDate(activeSchedule.date);
-
-          setTime(
-            activeSchedule.collection_time
-              ?.slice(0, 5) ||
-              "08:00"
-          );
-
-          setSelectedCollectorId(
-            activeSchedule.assigned_collector_id ||
-              ""
-          );
-
-          setMonth(
-            monthFromDate(
-              activeSchedule.date
-            )
-          );
-        } else {
-          setSelectedCollectorId("");
-        }
+            return (
+              summaries[0]
+                ?.report.report_id ??
+              null
+            );
+          }
+        );
       } catch (cause) {
-        if (isActive()) {
+        console.error(
+          "[WasteTrack] Load site reports:",
+          cause
+        );
+
+        if (active) {
           setError(
             cause instanceof Error
               ? cause.message
-              : "Unable to load report."
+              : "Unable to load site reports."
           );
         }
       } finally {
-        if (isActive()) {
+        if (active) {
           setLoading(false);
         }
       }
-    },
-    [targetId]
+    }
+
+    void loadAllReports();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    targetId,
+    requestedReportId,
+    refreshKey,
+  ]);
+
+  // ========================================
+  // SELECTED REPORT
+  // ========================================
+
+  const selected =
+    reports.find(
+      (summary) =>
+        summary.report.report_id ===
+        selectedReportId
+    ) ??
+    null;
+
+  const alreadyScheduled =
+    Boolean(
+      selected?.activeSchedule
+    );
+
+  const level = levelOf(
+    selected?.report
+      .cnn_detection_level ??
+      null
   );
 
   // ========================================
-  // INITIAL LOAD AND REFRESH
+  // AVAILABLE COLLECTORS
+  // ========================================
+
+  const availableCollectors =
+    collectors.filter(
+      (collector) =>
+        collector.is_active &&
+        collector.collector_status
+          ?.trim()
+          .toLowerCase() !==
+          "on leave"
+    );
+
+  const assignedCollectorName =
+    selected?.activeSchedule
+      ? collectors.find(
+          (collector) =>
+            collector.user_id ===
+            selected.activeSchedule
+              ?.assigned_collector_id
+        )?.full_name ||
+        "Assigned collector"
+      : "Not yet assigned";
+
+  const siteName =
+    site?.site_name ||
+    selected?.report.site_description ||
+    "Disposal site";
+
+  const locationName =
+    site?.location ||
+    selected?.report.address ||
+    "Not provided";
+
+  // ========================================
+  // SEARCH REPORTS
+  // ========================================
+
+  const filteredReports =
+    reports.filter(
+      (item) => {
+        const search =
+          reportSearch
+            .trim()
+            .toLowerCase();
+
+        if (!search) {
+          return true;
+        }
+
+        return (
+          item.reporter
+            .toLowerCase()
+            .includes(search) ||
+
+          item.report.report_id
+            .toLowerCase()
+            .includes(search) ||
+
+          levelOf(
+            item.report.cnn_detection_level
+          )
+            .toLowerCase()
+            .includes(search)
+        );
+      }
+    );
+
+  // ========================================
+  // LOAD SELECTED REPORT PHOTO
   // ========================================
 
   useEffect(() => {
     let active = true;
 
-    void fetchDetails(() => active);
+    setReportPhotoUrl("");
+    setPhotoError("");
+    setImageFailed(false);
+
+    if (!selected) {
+      return;
+    }
+
+    // ==================================
+    // SET EXISTING OR DEFAULT SCHEDULE
+    // ==================================
+
+    if (
+      selected.activeSchedule
+    ) {
+      setDate(
+        selected.activeSchedule.date
+      );
+
+      setTime(
+        selected.activeSchedule
+          .collection_time
+          ?.slice(0, 5) ||
+        "08:00"
+      );
+
+      setMonth(
+        monthFromDate(
+          selected.activeSchedule.date
+        )
+      );
+
+      setSelectedCollectorId(
+        selected.activeSchedule
+          .assigned_collector_id ||
+        ""
+      );
+    } else {
+      const suggested =
+        phDateTime();
+
+      setDate(suggested.date);
+      setTime(suggested.time);
+
+      setMonth(
+        monthFromDate(
+          suggested.date
+        )
+      );
+
+      setSelectedCollectorId("");
+    }
+
+    const reportId =
+      selected.report.report_id;
+
+    // ==================================
+    // LOAD PHOTO FROM SUPABASE STORAGE
+    // ==================================
+
+    async function loadPhoto() {
+      setPhotoLoading(true);
+
+      try {
+        const {
+          data,
+          error: imageError,
+        } = await supabase
+          .from("waste_images")
+          .select(
+            "src,storage_bucket,storage_path"
+          )
+          .eq(
+            "report_id",
+            reportId
+          )
+          .order(
+            "created_at",
+            {
+              ascending: false,
+            }
+          )
+          .limit(1)
+          .maybeSingle();
+
+        if (imageError) {
+          throw imageError;
+        }
+
+        const url =
+          await getReportPhoto(
+            (data as WasteImage | null) ??
+              null
+          );
+
+        if (!active) {
+          return;
+        }
+
+        setReportPhotoUrl(url);
+
+        if (!url) {
+          setPhotoError(
+            "No photo uploaded for this report."
+          );
+        }
+      } catch (cause) {
+        if (active) {
+          setPhotoError(
+            cause instanceof Error
+              ? cause.message
+              : "Unable to load photo."
+          );
+        }
+      } finally {
+        if (active) {
+          setPhotoLoading(false);
+        }
+      }
+    }
+
+    void loadPhoto();
 
     return () => {
       active = false;
     };
-  }, [fetchDetails, refreshKey]);
+  }, [
+    selectedReportId,
+    reports,
+  ]);
 
   // ========================================
-  // COLLECTOR DETAILS
-  // ========================================
-
-  const collectorName = details?.activeSchedule
-    ? collectors.find(
-        (collector) =>
-          collector.user_id ===
-          details.activeSchedule?.assigned_collector_id
-      )?.full_name || "Assigned collector"
-    : "Not yet assigned";
-
-  // ========================================
-  // UPDATE CALENDAR DATE
+  // CHANGE COLLECTION DATE
   // ========================================
 
   function changeDate(value: string) {
     setDate(value);
+
+    if (
+      /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ) {
+      setMonth(
+        monthFromDate(value)
+      );
+    }
+
     setSaveError("");
     setConfirmation("");
-
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      setMonth(monthFromDate(value));
-    }
   }
 
   // ========================================
-  // APPROVE / ASSIGN COLLECTOR
+  // APPROVE AND ASSIGN COLLECTOR
   // ========================================
 
   async function handleApprove() {
@@ -1378,58 +1526,100 @@ export default function WasteStatusDetails() {
     setConfirmation("");
 
     if (
-      !details ||
-      details.activeSchedule ||
+      !selected ||
+      alreadyScheduled ||
       saving
     ) {
       return;
     }
 
-    if (!details.report.site_id) {
+    // ==================================
+    // VALIDATE SITE
+    // ==================================
+
+    if (
+      !selected.report.site_id
+    ) {
       setSaveError(
-        "This report must be linked to a registered disposal site."
+        "This report must be linked to a registered disposal site before scheduling."
       );
+
       return;
     }
 
-    if (!selectedCollectorId) {
+    // ==================================
+    // VALIDATE COLLECTOR
+    // ==================================
+
+    if (
+      !selectedCollectorId
+    ) {
       setSaveError(
         "Select a collector before approving."
       );
+
       return;
     }
+
+    const collectorAvailable =
+      availableCollectors.some(
+        (collector) =>
+          collector.user_id ===
+          selectedCollectorId
+      );
+
+    if (
+      !collectorAvailable
+    ) {
+      setSaveError(
+        "The selected collector is not currently available."
+      );
+
+      return;
+    }
+
+    // ==================================
+    // VALIDATE DATE AND TIME
+    // ==================================
 
     if (!date || !time) {
       setSaveError(
         "Choose a collection date and time."
       );
+
       return;
     }
 
-    const timestamp = new Date(
-      `${date}T${time}:00+08:00`
-    ).getTime();
+    const timestamp =
+      new Date(
+        `${date}T${time}:00+08:00`
+      ).getTime();
 
     if (
       !Number.isFinite(timestamp) ||
       timestamp <= Date.now()
     ) {
       setSaveError(
-        "Choose a future collection date and time."
+        "Choose a future collection date and time (Philippine time)."
       );
+
       return;
     }
 
     setSaving(true);
 
     try {
+      // ==================================
+      // SUPABASE RPC
+      // ==================================
+
       const {
         error: approvalError,
       } = await supabase.rpc(
         "admin_assign_waste_collector",
         {
           p_report_id:
-            details.report.report_id,
+            selected.report.report_id,
 
           p_collector_id:
             selectedCollectorId,
@@ -1449,14 +1639,20 @@ export default function WasteStatusDetails() {
         `Collector assigned for ${date} at ${time}.`
       );
 
+      // Reload reports and schedules.
       setRefreshKey(
         (value) => value + 1
       );
     } catch (cause) {
+      console.error(
+        "[WasteTrack] Schedule report:",
+        cause
+      );
+
       setSaveError(
         cause instanceof Error
           ? cause.message
-          : "Could not save the assignment."
+          : "Could not save assignment."
       );
     } finally {
       setSaving(false);
@@ -1464,399 +1660,1327 @@ export default function WasteStatusDetails() {
   }
 
   // ========================================
-  // CNN RESULT
-  // ========================================
-
-  const level = levelOf(
-    details?.report.cnn_detection_level ??
-      null
-  );
-
-  const badgeClass =
-    level === "Near Full"
-      ? "near"
-      : level === "Empty"
-        ? "empty"
-        : level === "Not analyzed"
-          ? "unknown"
-          : "";
-
-  const alreadyScheduled = Boolean(
-    details?.activeSchedule
-  );
-
-  // ========================================
-  // RENDER
+  // MAIN UI
   // ========================================
 
   return (
-    <div className="wd-root">
-      <style>{css}</style>
+    <main
+      className="
+        min-h-[100dvh]
+        w-full
+        bg-[#FFFCF8]
+        font-['Fira_Sans','Segoe_UI',Arial,sans-serif]
+        text-[#242424]
+      "
+    >
+      {/* ====================================
+          HEADER
+      ==================================== */}
 
-      {/* HEADER */}
-      <header className="wd-head">
-        <div>
-          <button
-            type="button"
-            className="wd-back"
-            onClick={() =>
-              navigate("/admin/waste-status")
-            }
-          >
-            ← Back to Waste status
-          </button>
-
-          <h1 className="wd-title">
-            Report review —{" "}
-            {details?.siteName ||
-              "Waste status"}
-          </h1>
-
-          <p className="wd-sub">
-            {details
-              ? `Submitted by ${details.reporter} · ${formatDateTime(
-                  details.report.date_uploaded
-                )}`
-              : "Loading report details..."}
-          </p>
-        </div>
-
-        <button
-          type="button"
-          className="wd-avatar"
-          title={adminName}
-          aria-label="Manage account"
-          onClick={() =>
-            navigate("/admin/account")
-          }
-        >
-          {getInitials(adminName)}
-        </button>
-      </header>
-
-      {/* LOADING */}
-      {loading && (
-        <p
-          role="status"
-          style={{ padding: 20 }}
-        >
-          Loading report details from Supabase...
-        </p>
-      )}
-
-      {/* LOAD ERROR */}
-      {error && (
+      <header
+        className="
+          border-b-[5px]
+          border-[#A5B26B]
+          bg-white
+        "
+      >
         <div
-          role="alert"
-          style={{ padding: 20 }}
+          className="
+            mx-auto
+            max-w-[1540px]
+            px-4 py-5
+            sm:px-6
+            lg:px-8
+          "
         >
-          <p className="wd-error">
-            {error}
-          </p>
+          {/* BACK BUTTON */}
 
           <button
-            className="wd-back"
             type="button"
             onClick={() =>
-              setRefreshKey(
-                (value) => value + 1
+              navigate(
+                "/admin/waste-status"
               )
             }
+            className="
+              mb-3 inline-flex
+              items-center gap-2
+              text-xs font-bold
+              text-[#A81B1E]
+              hover:underline
+            "
           >
-            Retry
+            <ArrowLeft size={16} />
+            Back to waste status
           </button>
-        </div>
-      )}
 
-      {!loading && !error && details && (
-        <div className="wd-body">
-          {/* ================================= */}
-          {/* LEFT COLUMN */}
-          {/* ================================= */}
-
-          <section className="wd-left">
-            {/* REPORT WASTE IMAGE - NO CROP */}
-            <div className="wd-photo">
-              {details.reportPhotoUrl &&
-              !imageFailed ? (
-                <img
-                  key={details.reportPhotoUrl}
-                  src={details.reportPhotoUrl}
-                  alt={`Waste photo submitted for ${details.siteName}`}
-                  loading="eager"
-                  onError={() =>
-                    setImageFailed(true)
-                  }
-                />
-              ) : (
-                <span className="wd-photo-placeholder">
-                  Report Waste photo unavailable.
-                </span>
-              )}
-            </div>
-
-            {photoError &&
-              !details.reportPhotoUrl && (
-                <p
-                  className="wd-error"
-                  role="status"
-                >
-                  {photoError}
-                </p>
-              )}
-
-            {/* CNN RESULT */}
-            <div className="wd-result-row">
-              <span className="wd-result-label">
-                CNN result
-              </span>
-
-              <span
-                className={`wd-result-badge ${badgeClass}`}
+          <div
+            className="
+              flex flex-wrap
+              items-center
+              justify-between
+              gap-3
+            "
+          >
+            <div className="min-w-0">
+              <h1
+                className="
+                  break-words
+                  text-[23px]
+                  font-extrabold
+                  tracking-tight
+                  sm:text-[28px]
+                "
               >
-                {level}
+                Report review
+              </h1>
+
+              <p
+                className="
+                  mt-1 flex
+                  items-start gap-1.5
+                  break-words
+                  text-[12px]
+                  text-[#777]
+                "
+              >
+                <MapPin
+                  size={14}
+                  className="
+                    mt-0.5 shrink-0
+                    text-[#A81B1E]
+                  "
+                />
+
+                {siteName}
+              </p>
+            </div>
+
+            {!loading && !error && (
+              <span
+                className="
+                  rounded-full
+                  border border-[#E3D8CB]
+                  bg-[#F7F0E4]
+                  px-3 py-2
+                  text-xs font-semibold
+                  text-[#5D5D5D]
+                "
+              >
+                {reports.length} report
+                {reports.length === 1
+                  ? ""
+                  : "s"}
               </span>
-            </div>
+            )}
+          </div>
+        </div>
+      </header>
 
-            {/* WASTE TYPE */}
-            <div className="wd-block">
-              <h2 className="wd-block-title">
-                TYPES OF WASTE REPORTED
-              </h2>
+      {/* ====================================
+          PAGE CONTENT
+      ==================================== */}
 
-              {formatWasteTypes(
-                details.report.waste_type
-              ).map((type) => (
-                <span
-                  key={type}
-                  className="wd-chip"
-                >
-                  {type}
-                </span>
-              ))}
-            </div>
+      <div
+        className="
+          mx-auto flex
+          max-w-[1540px]
+          flex-col gap-5
+          px-4 py-6
+          sm:px-6
+          lg:px-8
+        "
+      >
+        {/* ====================================
+            LOADING
+        ==================================== */}
 
-            {/* SITE DETAILS */}
-            <div className="wd-block">
-              <h2 className="wd-block-title">
-                SITE DETAILS
-              </h2>
-
-              <div className="wd-fact">
-                <span className="wd-fact-label">
-                  Location:
-                </span>
-
-                <span className="wd-fact-value">
-                  {details.locationName}
-                </span>
-              </div>
-
-              <div className="wd-fact">
-                <span className="wd-fact-label">
-                  Assigned Collector:
-                </span>
-
-                <span className="wd-fact-value">
-                  {collectorName}
-                </span>
-              </div>
-
-              <div className="wd-fact">
-                <span className="wd-fact-label">
-                  Reported:
-                </span>
-
-                <span className="wd-fact-value">
-                  {relativeTime(
-                    details.report.date_uploaded
-                  )}
-                </span>
-              </div>
-
-              <div className="wd-fact">
-                <span className="wd-fact-label">
-                  Report Status:
-                </span>
-
-                <span className="wd-fact-value">
-                  {details.currentStatus}
-                </span>
-              </div>
-            </div>
-          </section>
-
-          {/* ================================= */}
-          {/* RIGHT COLUMN */}
-          {/* ================================= */}
-
-          <aside className="wd-side-panel">
-            {/* CALENDAR */}
-            <MiniCalendar
-              date={date}
-              month={month}
-              setMonth={setMonth}
-              onSelect={changeDate}
-              disabled={
-                alreadyScheduled ||
-                saving
-              }
+        {loading && (
+          <div
+            role="status"
+            className="
+              flex min-h-[230px]
+              items-center
+              justify-center
+              gap-3
+              rounded-2xl
+              border border-[#EAE2D7]
+              bg-white
+            "
+          >
+            <LoaderCircle
+              size={26}
+              className="
+                animate-spin
+                text-[#A5B26B]
+              "
             />
 
-            {/* DATE AND TIME */}
-            <div className="wd-datetime">
-              <div className="wd-field">
-                <label htmlFor="wd-date">
-                  Date:
-                </label>
-
-                <input
-                  id="wd-date"
-                  type="date"
-                  value={date}
-                  onChange={(event) =>
-                    changeDate(
-                      event.target.value
-                    )
-                  }
-                  disabled={
-                    alreadyScheduled ||
-                    saving
-                  }
-                />
-              </div>
-
-              <div className="wd-field">
-                <label htmlFor="wd-time">
-                  Time (PH):
-                </label>
-
-                <input
-                  id="wd-time"
-                  type="time"
-                  value={time}
-                  onChange={(event) => {
-                    setTime(event.target.value);
-                    setSaveError("");
-                  }}
-                  disabled={
-                    alreadyScheduled ||
-                    saving
-                  }
-                />
-              </div>
-            </div>
-
-            {/* ASSIGNED COLLECTOR */}
-            <div
-              className="wd-field"
-              style={{ marginTop: 14 }}
+            <span
+              className="
+                text-[13px]
+                text-[#777]
+              "
             >
-              <label htmlFor="wd-collector">
-                Assigned collector:
-              </label>
+              Loading site reports...
+            </span>
+          </div>
+        )}
 
-              <select
-                id="wd-collector"
-                value={selectedCollectorId}
-                onChange={(event) => {
-                  setSelectedCollectorId(
-                    event.target.value
-                  );
-                  setSaveError("");
-                }}
-                disabled={
-                  alreadyScheduled ||
-                  saving
-                }
+        {/* ====================================
+            ERROR
+        ==================================== */}
+
+        {!loading && error && (
+          <div
+            role="alert"
+            className="
+              rounded-2xl
+              border border-red-200
+              bg-red-50 p-5
+            "
+          >
+            <div
+              className="
+                flex items-start
+                gap-3 text-[#A81B1E]
+              "
+            >
+              <AlertCircle
+                size={20}
+                className="shrink-0"
+              />
+
+              <p
+                className="
+                  break-words
+                  text-sm
+                "
               >
-                <option value="">
-                  Select a collector
-                </option>
-
-                {collectors.map(
-                  (collector) => (
-                    <option
-                      key={collector.user_id}
-                      value={collector.user_id}
-                    >
-                      {collector.full_name ||
-                        "Unnamed collector"}
-                    </option>
-                  )
-                )}
-              </select>
+                {error}
+              </p>
             </div>
 
-            {/* APPROVAL BUTTON */}
             <button
               type="button"
-              className="wd-approve"
               onClick={() =>
-                void handleApprove()
+                setRefreshKey(
+                  (value) => value + 1
+                )
               }
-              disabled={
-                saving ||
-                alreadyScheduled ||
-                !selectedCollectorId ||
-                !details.report.site_id ||
-                collectors.length === 0
-              }
+              className="
+                mt-4 rounded-lg
+                bg-[#A81B1E]
+                px-4 py-2
+                text-xs font-bold
+                text-white
+                hover:bg-[#8F1619]
+              "
             >
-              {saving
-                ? "Saving assignment..."
-                : alreadyScheduled
-                  ? "Already assigned"
-                  : "Approve & assign collector"}
+              Try again
             </button>
+          </div>
+        )}
 
-            {/* MESSAGES */}
-            {alreadyScheduled && (
-              <p
-                className="wd-confirm"
-                role="status"
+        {!loading && !error && (
+          <>
+            {/* ====================================
+                REPORT SELECTION
+            ==================================== */}
+
+            <section
+              className="
+                min-w-0
+                rounded-2xl
+                border border-[#EAE2D7]
+                bg-white
+                p-4 shadow-sm
+                sm:p-5
+              "
+            >
+              {/* REPORT LIST HEADER */}
+
+              <div
+                className="
+                  mb-4 flex
+                  flex-wrap
+                  items-center
+                  justify-between
+                  gap-3
+                "
               >
-                This report already has an active
-                schedule (
-                {details.activeSchedule?.status}).
-              </p>
-            )}
+                <div
+                  className="
+                    flex items-center
+                    gap-3
+                  "
+                >
+                  <div
+                    className="
+                      grid h-10 w-10
+                      place-items-center
+                      rounded-xl
+                      bg-[#F7F0E4]
+                      text-[#A81B1E]
+                    "
+                  >
+                    <ClipboardList
+                      size={20}
+                    />
+                  </div>
 
-            {confirmation && (
-              <p
-                className="wd-confirm"
-                role="status"
+                  <div>
+                    <h2
+                      className="
+                        text-[15px]
+                        font-extrabold
+                      "
+                    >
+                      Reports for this site
+                    </h2>
+
+                    <p
+                      className="
+                        text-[11px]
+                        text-[#999]
+                      "
+                    >
+                      Choose a report to review and schedule
+                    </p>
+                  </div>
+                </div>
+
+                {/* SEARCH REPORTS */}
+
+                {reports.length > 4 && (
+                  <input
+                    type="search"
+                    value={reportSearch}
+                    onChange={(event) =>
+                      setReportSearch(
+                        event.target.value
+                      )
+                    }
+                    aria-label="Search reports"
+                    placeholder="Search reports..."
+                    className="
+                      w-full rounded-xl
+                      border border-[#E5DBCD]
+                      bg-[#FFFCF8]
+                      px-3 py-2
+                      text-xs
+                      outline-none
+                      focus:border-[#A5B26B]
+                      sm:w-[230px]
+                    "
+                  />
+                )}
+              </div>
+
+              {/* NO REPORTS */}
+
+              {reports.length === 0 ? (
+                <p
+                  className="
+                    rounded-xl
+                    bg-[#F7F0E4]
+                    px-4 py-7
+                    text-center
+                    text-xs text-[#777]
+                  "
+                >
+                  No waste reports have been
+                  submitted for this site.
+                </p>
+              ) : filteredReports.length === 0 ? (
+                <p
+                  className="
+                    rounded-xl
+                    bg-[#F7F0E4]
+                    px-4 py-7
+                    text-center
+                    text-xs text-[#777]
+                  "
+                >
+                  No matching reports found.
+                </p>
+              ) : (
+                // ==================================
+                // REPORT CARDS
+                // ==================================
+
+                <div
+                  className="
+                    grid max-h-[310px]
+                    grid-cols-1
+                    gap-3
+                    overflow-y-auto
+                    pr-1
+                    sm:grid-cols-2
+                    xl:grid-cols-3
+                  "
+                >
+                  {filteredReports.map(
+                    ({
+                      report,
+                      reporter,
+                      currentStatus,
+                      activeSchedule,
+                    }) => {
+                      const active =
+                        report.report_id ===
+                        selectedReportId;
+
+                      const reportLevel =
+                        levelOf(
+                          report.cnn_detection_level
+                        );
+
+                      return (
+                        <button
+                          key={report.report_id}
+                          type="button"
+                          disabled={saving}
+                          aria-pressed={active}
+                          onClick={() => {
+                            setSelectedReportId(
+                              report.report_id
+                            );
+
+                            setSaveError("");
+                            setConfirmation("");
+                          }}
+                          className={`
+                            min-w-0
+                            rounded-xl
+                            border p-3.5
+                            text-left
+                            transition
+                            disabled:cursor-wait
+                            ${
+                              active
+                                ? "border-[#B5202A] bg-[#FFF5F3] shadow-[0_0_0_1px_#B5202A]"
+                                : "border-[#E7E0D5] bg-[#FFFCF8] hover:border-[#D3C5B7] hover:bg-white"
+                            }
+                          `}
+                        >
+                          {/* REPORT HEADER */}
+
+                          <div
+                            className="
+                              flex flex-wrap
+                              items-center
+                              justify-between
+                              gap-2
+                            "
+                          >
+                            <span
+                              className="
+                                text-[11px]
+                                font-extrabold
+                                text-[#333]
+                              "
+                            >
+                              Report{" "}
+                              {report.report_id
+                                .slice(0, 8)
+                                .toUpperCase()}
+                            </span>
+
+                            <span
+                              className={`
+                                rounded-full
+                                px-2 py-1
+                                text-[10px]
+                                font-bold
+                                ${
+                                  activeSchedule
+                                    ? "bg-[#ECF4E5] text-[#5D7C3E]"
+                                    : "bg-[#FFF0CF] text-[#956A13]"
+                                }
+                              `}
+                            >
+                              {activeSchedule
+                                ? "Scheduled"
+                                : "Not scheduled"}
+                            </span>
+                          </div>
+
+                          {/* REPORTER */}
+
+                          <p
+                            className="
+                              mt-2 truncate
+                              text-[12px]
+                              font-semibold
+                              text-[#555]
+                            "
+                          >
+                            {reporter}
+                          </p>
+
+                          {/* REPORT DATE */}
+
+                          <p
+                            className="
+                              mt-1
+                              text-[11px]
+                              text-[#999]
+                            "
+                          >
+                            {formatDateTime(
+                              report.date_uploaded
+                            )}
+                          </p>
+
+                          {/* WASTE LEVEL */}
+
+                          <div
+                            className="
+                              mt-3 flex
+                              flex-wrap
+                              items-center
+                              gap-2
+                            "
+                          >
+                            <span
+                              className={`
+                                rounded-full
+                                border
+                                px-2 py-1
+                                text-[10px]
+                                font-bold
+                                ${levelStyle(reportLevel)}
+                              `}
+                            >
+                              {reportLevel}
+                            </span>
+
+                            <span
+                              className="
+                                text-[10px]
+                                text-[#888]
+                              "
+                            >
+                              {currentStatus}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    }
+                  )}
+                </div>
+              )}
+            </section>
+
+            {/* ====================================
+                SELECTED REPORT DETAILS
+            ==================================== */}
+
+            {selected && (
+              <div
+                className="
+                  grid min-w-0
+                  grid-cols-1
+                  items-start
+                  gap-5
+                  lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,1fr)]
+                "
               >
-                {confirmation}
-              </p>
-            )}
+                {/* ==================================
+                    LEFT COLUMN
+                ================================== */}
 
-            {saveError && (
-              <p
-                className="wd-error"
-                role="alert"
-              >
-                {saveError}
-              </p>
-            )}
+                <div
+                  className="
+                    flex min-w-0
+                    flex-col gap-5
+                  "
+                >
+                  {/* ==================================
+                      REPORTED WASTE PHOTO
+                  ================================== */}
 
-            {!details.report.site_id && (
-              <p className="wd-note">
-                This report must be linked to a
-                registered disposal site before
-                scheduling.
-              </p>
-            )}
+                  <section
+                    className="
+                      min-w-0
+                      overflow-hidden
+                      rounded-2xl
+                      border border-[#EAE2D7]
+                      bg-white
+                      shadow-sm
+                    "
+                  >
+                    {/* PHOTO HEADER */}
 
-            {collectors.length === 0 && (
-              <p className="wd-note">
-                No active collector accounts
-                found in Supabase.
-              </p>
+                    <div
+                      className="
+                        flex flex-wrap
+                        items-center
+                        justify-between
+                        gap-2
+                        border-b
+                        border-[#EFE8DD]
+                        px-4 py-4
+                        sm:px-5
+                      "
+                    >
+                      <div
+                        className="
+                          flex items-center
+                          gap-2
+                        "
+                      >
+                        <MapPin
+                          size={17}
+                          className="text-[#A81B1E]"
+                        />
+
+                        <h2
+                          className="
+                            text-[14px]
+                            font-extrabold
+                          "
+                        >
+                          Reported waste photo
+                        </h2>
+                      </div>
+
+                      <span
+                        className="
+                          text-[11px]
+                          text-[#999]
+                        "
+                      >
+                        Original uploaded image
+                      </span>
+                    </div>
+
+                    {/* ==================================
+                        PHOTO DISPLAY
+                        NO CROPPING / NO ZOOM
+                    ================================== */}
+
+                    <div
+                      className="
+                        flex min-h-[230px]
+                        items-center
+                        justify-center
+                        bg-[#F7F0E4]
+                        p-3 sm:p-4
+                      "
+                    >
+                      {photoLoading ? (
+                        <div
+                          className="
+                            flex flex-col
+                            items-center
+                            gap-2 py-12
+                          "
+                        >
+                          <LoaderCircle
+                            size={28}
+                            className="
+                              animate-spin
+                              text-[#A5B26B]
+                            "
+                          />
+
+                          <span
+                            className="
+                              text-xs
+                              text-[#777]
+                            "
+                          >
+                            Loading report photo...
+                          </span>
+                        </div>
+                      ) : reportPhotoUrl &&
+                        !imageFailed ? (
+                        <img
+                          src={reportPhotoUrl}
+                          alt={`Waste report for ${siteName}`}
+                          loading="eager"
+                          onError={() =>
+                            setImageFailed(true)
+                          }
+                          className="
+                            block h-auto
+                            max-h-[65dvh]
+                            w-full max-w-full
+                            rounded-xl
+                            object-contain
+                          "
+                        />
+                      ) : (
+                        <div
+                          className="
+                            flex flex-col
+                            items-center
+                            gap-3 py-12
+                            text-center
+                            text-[#888]
+                          "
+                        >
+                          <ImageOff
+                            size={30}
+                          />
+
+                          <p className="text-xs">
+                            Photo unavailable
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* PHOTO ERROR */}
+
+                    {photoError && (
+                      <p
+                        role="status"
+                        className="
+                          px-4 py-3
+                          text-xs
+                          text-[#A81B1E]
+                          sm:px-5
+                        "
+                      >
+                        {photoError}
+                      </p>
+                    )}
+
+                    {/* ==================================
+                        CNN RESULT
+                    ================================== */}
+
+                    <div
+                      className="
+                        flex flex-wrap
+                        items-center
+                        justify-between
+                        gap-3
+                        px-4 py-4
+                        sm:px-5
+                      "
+                    >
+                      <div>
+                        <p
+                          className="
+                            text-[10px]
+                            font-bold
+                            uppercase
+                            tracking-wide
+                            text-[#999]
+                          "
+                        >
+                          CNN result
+                        </p>
+
+                        <p
+                          className="
+                            mt-1
+                            text-[12px]
+                            text-[#777]
+                          "
+                        >
+                          Detected waste level
+                        </p>
+                      </div>
+
+                      <span
+                        className={`
+                          inline-flex
+                          items-center
+                          rounded-full
+                          border px-4 py-2
+                          text-[12px]
+                          font-extrabold
+                          ${levelStyle(level)}
+                        `}
+                      >
+                        {level}
+                      </span>
+                    </div>
+                  </section>
+
+                  {/* ==================================
+                      REPORT INFORMATION
+                      WASTE TYPES REMOVED
+                  ================================== */}
+
+                  <section
+                    className="
+                      rounded-2xl
+                      border border-[#EAE2D7]
+                      bg-white
+                      p-4
+                      shadow-sm
+                      sm:p-5
+                    "
+                  >
+                    {/* INFORMATION HEADER */}
+
+                    <div
+                      className="
+                        mb-4 flex
+                        items-center
+                        gap-3
+                      "
+                    >
+                      <div
+                        className="
+                          grid h-10 w-10
+                          place-items-center
+                          rounded-xl
+                          bg-[#EEF4E5]
+                          text-[#6F8D47]
+                        "
+                      >
+                        <ClipboardList
+                          size={19}
+                        />
+                      </div>
+
+                      <h2
+                        className="
+                          text-[15px]
+                          font-extrabold
+                        "
+                      >
+                        Report information
+                      </h2>
+                    </div>
+
+                    {/* ==================================
+                        REPORT DETAILS ONLY
+                    ================================== */}
+
+                    <div
+                      className="
+                        grid grid-cols-1
+                        gap-4
+                        sm:grid-cols-2
+                      "
+                    >
+                      {[
+                        {
+                          label: "Location",
+                          value: locationName,
+                          icon: MapPin,
+                        },
+                        {
+                          label: "Reported by",
+                          value: selected.reporter,
+                          icon: UserRound,
+                        },
+                        {
+                          label: "Assigned collector",
+                          value: assignedCollectorName,
+                          icon: UserRound,
+                        },
+                        {
+                          label: "Reported",
+                          value: relativeTime(
+                            selected.report.date_uploaded
+                          ),
+                          icon: Clock3,
+                        },
+                        {
+                          label: "Report status",
+                          value: selected.currentStatus,
+                          icon: ShieldCheck,
+                        },
+                        {
+                          label: "Report ID",
+                          value:
+                            selected.report.report_id,
+                          icon: ClipboardList,
+                        },
+                      ].map(
+                        ({
+                          label,
+                          value,
+                          icon: Icon,
+                        }) => (
+                          <div
+                            key={label}
+                            className="min-w-0"
+                          >
+                            <p
+                              className="
+                                flex items-center
+                                gap-1.5
+                                text-[11px]
+                                font-semibold
+                                text-[#999]
+                              "
+                            >
+                              <Icon
+                                size={13}
+                              />
+
+                              {label}
+                            </p>
+
+                            <p
+                              className="
+                                mt-1 break-words
+                                text-[12px]
+                                font-bold
+                                text-[#343434]
+                              "
+                            >
+                              {value}
+                            </p>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </section>
+                </div>
+
+                {/* ==================================
+                    RIGHT COLUMN
+                    COLLECTION SCHEDULING
+                ================================== */}
+
+                <aside
+                  className="
+                    min-w-0
+                    rounded-2xl
+                    border border-[#EAE2D7]
+                    bg-white
+                    shadow-sm
+                    lg:sticky
+                    lg:top-5
+                  "
+                >
+                  {/* SCHEDULING HEADER */}
+
+                  <div
+                    className="
+                      flex items-center
+                      gap-3
+                      rounded-t-2xl
+                      bg-[#F7F0E4]
+                      px-4 py-5
+                      sm:px-5
+                    "
+                  >
+                    <div
+                      className="
+                        grid h-11 w-11
+                        place-items-center
+                        rounded-xl
+                        bg-[#A81B1E]
+                        text-white
+                      "
+                    >
+                      <CalendarDays
+                        size={21}
+                      />
+                    </div>
+
+                    <div>
+                      <h2
+                        className="
+                          text-[15px]
+                          font-extrabold
+                        "
+                      >
+                        Collection scheduling
+                      </h2>
+
+                      <p
+                        className="
+                          mt-0.5
+                          text-[11px]
+                          text-[#777]
+                        "
+                      >
+                        {alreadyScheduled
+                          ? "Collector already assigned"
+                          : "Schedule the selected waste report"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* ==================================
+                      SCHEDULING FORM
+                  ================================== */}
+
+                  <div
+                    className="
+                      space-y-4
+                      p-4 sm:p-5
+                    "
+                  >
+                    {/* EXISTING SCHEDULE */}
+
+                    {alreadyScheduled && (
+                      <div
+                        role="status"
+                        className="
+                          flex items-start
+                          gap-2
+                          rounded-xl
+                          border border-[#D7E9C7]
+                          bg-[#F1F8E9]
+                          p-3
+                          text-[12px]
+                          text-[#557836]
+                        "
+                      >
+                        <CheckCircle2
+                          size={18}
+                          className="shrink-0"
+                        />
+
+                        <span>
+                          This report already
+                          has a schedule (
+                          {selected.activeSchedule
+                            ?.status}
+                          ).
+                        </span>
+                      </div>
+                    )}
+
+                    {/* ==================================
+                        CALENDAR
+                    ================================== */}
+
+                    <MiniCalendar
+                      date={date}
+                      month={month}
+                      setMonth={setMonth}
+                      onSelect={changeDate}
+                      disabled={
+                        alreadyScheduled ||
+                        saving
+                      }
+                    />
+
+                    {/* ==================================
+                        DATE AND TIME INPUTS
+                    ================================== */}
+
+                    <div
+                      className="
+                        grid grid-cols-1
+                        gap-3
+                        sm:grid-cols-2
+                        lg:grid-cols-1
+                        xl:grid-cols-2
+                      "
+                    >
+                      {/* DATE */}
+
+                      <div>
+                        <label
+                          htmlFor="wd-date"
+                          className="
+                            mb-1.5 block
+                            text-[11px]
+                            font-bold
+                            text-[#666]
+                          "
+                        >
+                          Collection date
+                        </label>
+
+                        <input
+                          id="wd-date"
+                          type="date"
+                          value={date}
+                          min={
+                            phDateTime(0).date
+                          }
+                          disabled={
+                            alreadyScheduled ||
+                            saving
+                          }
+                          onChange={(event) =>
+                            changeDate(
+                              event.target.value
+                            )
+                          }
+                          className={
+                            fieldClass
+                          }
+                        />
+                      </div>
+
+                      {/* TIME */}
+
+                      <div>
+                        <label
+                          htmlFor="wd-time"
+                          className="
+                            mb-1.5 block
+                            text-[11px]
+                            font-bold
+                            text-[#666]
+                          "
+                        >
+                          Time (Philippines)
+                        </label>
+
+                        <input
+                          id="wd-time"
+                          type="time"
+                          value={time}
+                          disabled={
+                            alreadyScheduled ||
+                            saving
+                          }
+                          onChange={(event) => {
+                            setTime(
+                              event.target.value
+                            );
+
+                            setSaveError("");
+                            setConfirmation("");
+                          }}
+                          className={
+                            fieldClass
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    {/* ==================================
+                        COLLECTOR SELECTION
+                    ================================== */}
+
+                    <div>
+                      <label
+                        htmlFor="wd-collector"
+                        className="
+                          mb-1.5 block
+                          text-[11px]
+                          font-bold
+                          text-[#666]
+                        "
+                      >
+                        Assigned collector
+                      </label>
+
+                      <select
+                        id="wd-collector"
+                        value={
+                          selectedCollectorId
+                        }
+                        disabled={
+                          alreadyScheduled ||
+                          saving
+                        }
+                        onChange={(event) => {
+                          setSelectedCollectorId(
+                            event.target.value
+                          );
+
+                          setSaveError("");
+                          setConfirmation("");
+                        }}
+                        className={
+                          fieldClass
+                        }
+                      >
+                        <option value="">
+                          Select a collector
+                        </option>
+
+                        {/* KEEP THE EXISTING
+                            ASSIGNED COLLECTOR
+                            VISIBLE EVEN IF
+                            CURRENTLY UNAVAILABLE */}
+
+                        {alreadyScheduled &&
+                          selectedCollectorId &&
+                          !availableCollectors.some(
+                            (collector) =>
+                              collector.user_id ===
+                              selectedCollectorId
+                          ) && (
+                            <option
+                              value={
+                                selectedCollectorId
+                              }
+                            >
+                              {assignedCollectorName}
+                            </option>
+                          )}
+
+                        {/* AVAILABLE COLLECTORS */}
+
+                        {availableCollectors.map(
+                          (collector) => (
+                            <option
+                              key={
+                                collector.user_id
+                              }
+                              value={
+                                collector.user_id
+                              }
+                            >
+                              {collector.full_name ||
+                                "Unnamed collector"}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </div>
+
+                    {/* ==================================
+                        APPROVE BUTTON
+                    ================================== */}
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleApprove()
+                      }
+                      disabled={
+                        saving ||
+                        alreadyScheduled ||
+                        !selectedCollectorId ||
+                        !selected.report.site_id ||
+                        availableCollectors.length === 0
+                      }
+                      className="
+                        flex w-full
+                        items-center
+                        justify-center
+                        gap-2
+                        rounded-xl
+                        bg-[#A81B1E]
+                        px-4 py-3.5
+                        text-[12px]
+                        font-bold
+                        text-white
+                        transition
+                        hover:bg-[#8F1619]
+                        disabled:cursor-not-allowed
+                        disabled:opacity-50
+                      "
+                    >
+                      {saving ? (
+                        <LoaderCircle
+                          size={17}
+                          className="animate-spin"
+                        />
+                      ) : (
+                        <CheckCircle2
+                          size={17}
+                        />
+                      )}
+
+                      {saving
+                        ? "Saving assignment..."
+                        : alreadyScheduled
+                          ? "Already assigned"
+                          : "Approve & assign collector"}
+                    </button>
+
+                    {/* ==================================
+                        SUCCESS MESSAGE
+                    ================================== */}
+
+                    {confirmation && (
+                      <div
+                        role="status"
+                        className="
+                          flex items-start
+                          gap-2
+                          rounded-xl
+                          border border-[#D7E9C7]
+                          bg-[#F1F8E9]
+                          p-3
+                          text-[12px]
+                          text-[#557836]
+                        "
+                      >
+                        <CheckCircle2
+                          size={17}
+                          className="shrink-0"
+                        />
+
+                        <span>
+                          {confirmation}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* ==================================
+                        ERROR MESSAGE
+                    ================================== */}
+
+                    {saveError && (
+                      <div
+                        role="alert"
+                        className="
+                          flex items-start
+                          gap-2
+                          rounded-xl
+                          border border-red-200
+                          bg-red-50
+                          p-3
+                          text-[12px]
+                          text-[#A81B1E]
+                        "
+                      >
+                        <AlertCircle
+                          size={17}
+                          className="shrink-0"
+                        />
+
+                        <span>
+                          {saveError}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* ==================================
+                        SITE VALIDATION NOTE
+                    ================================== */}
+
+                    {!selected.report.site_id && (
+                      <p
+                        className="
+                          text-[11px]
+                          text-[#9A6A08]
+                        "
+                      >
+                        This report must be linked
+                        to a registered disposal
+                        site before scheduling.
+                      </p>
+                    )}
+
+                    {/* ==================================
+                        COLLECTOR AVAILABILITY NOTE
+                    ================================== */}
+
+                    {availableCollectors.length ===
+                      0 && (
+                      <p
+                        className="
+                          text-[11px]
+                          text-[#9A6A08]
+                        "
+                      >
+                        No available active
+                        collector accounts found.
+                      </p>
+                    )}
+                  </div>
+                </aside>
+              </div>
             )}
-          </aside>
-        </div>
-      )}
-    </div>
+          </>
+        )}
+      </div>
+    </main>
   );
 }
