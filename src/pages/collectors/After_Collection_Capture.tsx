@@ -1,10 +1,11 @@
+
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
 import {
   ArrowLeft,
   Check,
-  FlashlightOff,
+  LoaderCircle,
   Scan,
 } from "lucide-react";
 
@@ -21,7 +22,7 @@ type CaptureState = {
   [key: string]: unknown;
 };
 
-function cameraErrorMessage(error: unknown) {
+function cameraErrorMessage(error: unknown): string {
   if (error instanceof DOMException) {
     switch (error.name) {
       case "NotAllowedError":
@@ -43,18 +44,12 @@ function cameraErrorMessage(error: unknown) {
     : "Unable to open the camera.";
 }
 
-export default function Capture() {
+export default function AfterCollectionCapture() {
   const navigate = useNavigate();
   const location = useLocation();
 
   const state = location.state as CaptureState | null;
   const draft = state?.draft;
-
-  const isResident =
-    location.pathname.startsWith("/resident/");
-
-  const isCollector =
-    location.pathname.startsWith("/collector/");
 
   const collectorReturnTo =
     state?.returnTo === "/collector/collection-details" ||
@@ -63,10 +58,6 @@ export default function Capture() {
     )
       ? state.returnTo
       : "/collector/waste-collection";
-
-  const returnTo = isResident
-    ? "/resident/report-waste/create"
-    : collectorReturnTo;
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -81,15 +72,21 @@ export default function Capture() {
   const [capturing, setCapturing] = useState(false);
   const [cameraAttempt, setCameraAttempt] = useState(0);
 
+  // COMPONENT LIFECYCLE
+
   useEffect(() => {
     mountedRef.current = true;
 
     return () => {
       mountedRef.current = false;
+      streamRef.current
+        ?.getTracks()
+        .forEach((track) => track.stop());
     };
   }, []);
 
-  // Open the live camera on entry, retry, or retake.
+  // INITIALIZE CAMERA
+
   useEffect(() => {
     if (photo) return;
 
@@ -180,7 +177,8 @@ export default function Capture() {
     };
   }, [photo, cameraAttempt]);
 
-  // Generate the captured-photo preview.
+  // IMAGE PREVIEW
+
   useEffect(() => {
     if (!photo) {
       setPreview("");
@@ -192,6 +190,8 @@ export default function Capture() {
 
     return () => URL.revokeObjectURL(url);
   }, [photo]);
+
+  // STOP CAMERA
 
   function stopCamera() {
     streamRef.current
@@ -205,16 +205,20 @@ export default function Capture() {
     }
   }
 
+  // GO BACK
+
   function goBack() {
     stopCamera();
 
-    navigate(returnTo, {
+    navigate(collectorReturnTo, {
       replace: true,
       state: {
         ...(state ?? {}),
       },
     });
   }
+
+  // TAKE PHOTO
 
   async function takePhoto() {
     const video = videoRef.current;
@@ -236,7 +240,6 @@ export default function Capture() {
     try {
       const canvas = document.createElement("canvas");
 
-      // Crop to match the visible 6:7 preview.
       const frameRatio = 6 / 7;
       const sourceRatio =
         video.videoWidth / video.videoHeight;
@@ -248,10 +251,12 @@ export default function Capture() {
 
       if (sourceRatio > frameRatio) {
         sourceWidth = sourceHeight * frameRatio;
-        sourceX = (video.videoWidth - sourceWidth) / 2;
+        sourceX =
+          (video.videoWidth - sourceWidth) / 2;
       } else {
         sourceHeight = sourceWidth / frameRatio;
-        sourceY = (video.videoHeight - sourceHeight) / 2;
+        sourceY =
+          (video.videoHeight - sourceHeight) / 2;
       }
 
       canvas.width = Math.round(sourceWidth);
@@ -297,7 +302,7 @@ export default function Capture() {
 
       const capturedPhoto = new File(
         [blob],
-        `waste-photo-${Date.now()}.jpg`,
+        `collection-photo-${Date.now()}.jpg`,
         { type: "image/jpeg" }
       );
 
@@ -321,6 +326,8 @@ export default function Capture() {
     }
   }
 
+  // RETAKE PHOTO
+
   function retakePhoto() {
     setError("");
     setReady(false);
@@ -328,62 +335,38 @@ export default function Capture() {
     setPhoto(null);
   }
 
+  // SUBMIT CAPTURED PHOTO
+
   function uploadPhoto() {
     if (!photo) return;
 
-    if (isResident) {
-      stopCamera();
+    stopCamera();
 
-      navigate("/resident/report-waste/analyzing", {
-        replace: true,
-        state: {
-          ...(state ?? {}),
+    navigate("/collector/submit-collection", {
+      replace: true,
+      state: {
+        ...(state ?? {}),
+        photo,
+        capturedPhoto: photo,
+        draft: {
+          ...draft,
           photo,
         },
-      });
-
-      return;
-    }
-
-    if (isCollector) {
-      stopCamera();
-
-      navigate("/collector/submit-collection", {
-        replace: true,
-        state: {
-          ...(state ?? {}),
-          photo,
-          capturedPhoto: photo,
-          draft: {
-            ...draft,
-            photo,
-          },
-        },
-      });
-
-      return;
-    }
-
-    setError(
-      "Open the camera from the resident or collector page."
-    );
+      },
+    });
   }
 
   return (
     <main className="h-[calc(100dvh-5rem)] overflow-y-auto overscroll-contain bg-white">
-      <div className="mx-auto flex min-h-full w-full max-w-[430px] flex-col px-5 pb-6 pt-6">
-        {/* Back button */}
+      <div className="mx-auto flex min-h-full w-full max-w-[430px] flex-col px-5 pb-6 pt-6 sm:max-w-[500px] lg:max-w-[600px]">
+
         <header className="shrink-0">
           <button
             type="button"
             onClick={goBack}
             disabled={capturing}
-            aria-label={
-              isResident
-                ? "Back to photo options"
-                : "Back to collection details"
-            }
-            className="grid h-10 w-10 place-items-center rounded-full text-black hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-600 disabled:opacity-40"
+            aria-label="Back to collection details"
+            className="grid h-10 w-10 place-items-center rounded-full text-black hover:bg-neutral-100 disabled:opacity-40"
           >
             <ArrowLeft size={21} strokeWidth={1.6} />
           </button>
@@ -391,8 +374,6 @@ export default function Capture() {
 
         {!photo ? (
           <>
-
-            {/* Live camera preview */}
             <div className="capture-size relative mx-auto mt-3">
               <div className="relative aspect-[6/7] w-full overflow-hidden bg-[#d9d9d9]">
                 <video
@@ -405,7 +386,7 @@ export default function Capture() {
                     setLoading(false);
                   }}
                   onWaiting={() => setReady(false)}
-                  aria-label="Live camera preview"
+                  aria-label="Live collection camera preview"
                   className="block h-full w-full object-cover object-center"
                 />
 
@@ -414,21 +395,25 @@ export default function Capture() {
                     role="status"
                     className="absolute inset-0 grid place-items-center bg-[#d9d9d9] px-4 text-center text-xs text-neutral-600"
                   >
-                    Opening camera...
+                    <div>
+                      <LoaderCircle
+                        size={26}
+                        className="mx-auto mb-3 animate-spin"
+                      />
+                      Opening camera...
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* Shutter button */}
               <button
                 type="button"
                 onClick={() => void takePhoto()}
                 disabled={!ready || capturing || !!error}
-                aria-label="Take a photo"
-                className="absolute bottom-0 left-1/2 grid h-12 w-12 -translate-x-1/2 translate-y-1/2 place-items-center rounded-full bg-white text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-600 disabled:opacity-40"
+                aria-label="Take a collection photo"
+                className="absolute bottom-0 left-1/2 grid h-12 w-12 -translate-x-1/2 translate-y-1/2 place-items-center rounded-full bg-white text-black disabled:opacity-40"
               >
                 <Scan size={32} strokeWidth={2} />
-
                 <span
                   aria-hidden="true"
                   className="absolute h-3.5 w-3.5 rounded-full bg-black"
@@ -436,7 +421,6 @@ export default function Capture() {
               </button>
             </div>
 
-            {/* Photo guidelines */}
             <section className="mx-auto mt-10 w-full max-w-[350px]">
               <h1 className="mb-3 text-sm font-semibold text-black">
                 Photo Guidelines
@@ -446,11 +430,9 @@ export default function Capture() {
                 <Guideline>
                   Take a clear photo of the waste bin
                 </Guideline>
-
                 <Guideline>
                   Make sure the bin is the main focus
                 </Guideline>
-
                 <Guideline>
                   Avoid blurry or dark images
                 </Guideline>
@@ -459,16 +441,15 @@ export default function Capture() {
           </>
         ) : (
           <>
-            {/* Captured-photo preview */}
             <section className="capture-size mx-auto mt-8">
               <h1 className="sr-only">
-                Review captured photo
+                Review captured collection photo
               </h1>
 
               {preview ? (
                 <img
                   src={preview}
-                  alt="Captured waste bin"
+                  alt="Captured collection evidence"
                   draggable={false}
                   className="block aspect-[6/7] w-full rounded-md object-cover"
                 />
@@ -477,12 +458,11 @@ export default function Capture() {
               )}
             </section>
 
-            {/* Photo actions */}
             <div className="mx-auto mt-auto grid w-full max-w-[350px] grid-cols-2 gap-2 pt-8">
               <button
                 type="button"
                 onClick={retakePhoto}
-                className="flex min-h-11 items-center justify-center rounded border border-[#ff383c] bg-[#f5e7d2] px-2 text-xs font-medium text-black hover:bg-[#f0ddc2] focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-600"
+                className="flex min-h-11 items-center justify-center rounded border border-[#ff383c] bg-[#f5e7d2] px-2 text-xs font-medium text-black hover:bg-[#f0ddc2]"
               >
                 RETAKE
               </button>
@@ -490,7 +470,7 @@ export default function Capture() {
               <button
                 type="button"
                 onClick={uploadPhoto}
-                className="flex min-h-11 items-center justify-center rounded border border-[#ff383c] bg-[#f5e7d2] px-2 text-xs font-medium text-black hover:bg-[#f0ddc2] focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-600"
+                className="flex min-h-11 items-center justify-center rounded border border-[#ff383c] bg-[#f5e7d2] px-2 text-xs font-medium text-black hover:bg-[#f0ddc2]"
               >
                 UPLOAD PHOTO
               </button>
@@ -525,6 +505,12 @@ export default function Capture() {
       <style>{`
         .capture-size {
           width: min(100%, 330px, 54dvh);
+        }
+
+        @media (min-width: 768px) {
+          .capture-size {
+            width: min(100%, 380px, 60dvh);
+          }
         }
 
         @media (orientation: landscape) and (max-height: 600px) {

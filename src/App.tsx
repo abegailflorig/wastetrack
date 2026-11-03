@@ -25,6 +25,7 @@ import Submitted from "./pages/resident/Submitted";
 import ResidentReports from "./pages/resident/ResidentReports";
 import ResidentReviewReports from "./pages/resident/ResidentReviewReports";
 import ResidentNotification from "./pages/resident/ResidentNotification";
+import Capture from "./pages/resident/Capture";
 
 /* Barangay staff pages */
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -49,13 +50,12 @@ import CollectionHistory from "./pages/collectors/CollectionHistory";
 import CollectorRoute from "./pages/collectors/Route";
 import WasteCollection from "./pages/collectors/WasteCollection";
 import SubmitCollection from "./pages/collectors/SubmitCollection";
-
+import After_Collection_Capture from "./pages/collectors/After_Collection_Capture";
 /* Shared pages */
 import Calendar from "./pages/shared/Calendar";
 import CalendarList from "./pages/shared/CalendarList";
 import ScheduleDetails from "./pages/shared/ScheduleDetails";
 import Profile from "./pages/shared/Profile";
-import Capture from "./pages/shared/Capture";
 
 export default function App() {
   return (
@@ -281,7 +281,7 @@ export default function App() {
 
         <Route
           path="/collector/capture"
-          element={<Capture />}
+          element={<After_Collection_Capture />}
         />
       </Route>
 

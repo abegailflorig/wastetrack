@@ -17,27 +17,60 @@ export default function Splash() {
     <main
       aria-label="WasteTrack loading"
       className="
-        grid min-h-[100dvh] w-full place-items-center
-        overflow-hidden px-5 py-8
+        relative flex min-h-[100dvh] w-full
+        items-center justify-center
+        overflow-hidden
+
         bg-[radial-gradient(circle_at_center,#ff8b8b_0%,#ff414b_45%,#e00008_100%)]
+
+        px-5 py-8
+        sm:px-8
+        md:px-12
+        lg:px-16
+        xl:px-20
       "
     >
-      <img
-        src={img("waste-logo.png")}
-        alt="WasteTrack Logo"
-        draggable={false}
+      {/* SPLASH CONTENT */}
+      <div
         className="
-          block h-auto max-h-[75dvh] max-w-full
-          w-[260px]
-          sm:w-[340px]
-          md:w-[420px]
-          lg:w-[500px]
-          xl:w-[580px]
-          object-contain drop-shadow-2xl
-          motion-safe:animate-pulse
-          select-none
+          relative z-10
+          flex w-full
+          max-w-[1400px]
+          flex-col
+          items-center
+          justify-center
         "
-      />
+      >
+        {/* WASTE TRACK LOGO */}
+        <img
+          src={img("waste-logo.png")}
+          alt="WasteTrack Logo"
+          draggable={false}
+          className="
+            block h-auto
+            max-h-[75dvh]
+            max-w-full
+            object-contain
+            select-none
+
+            w-[260px]
+
+            sm:w-[340px]
+
+            md:w-[420px]
+
+            lg:w-[500px]
+
+            xl:w-[580px]
+
+            2xl:w-[650px]
+
+            drop-shadow-2xl
+
+            motion-safe:animate-pulse
+          "
+        />
+      </div>
     </main>
   );
 }

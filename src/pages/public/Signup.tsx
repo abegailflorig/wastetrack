@@ -1,3 +1,4 @@
+
 import {
   useId,
   useState,
@@ -43,9 +44,11 @@ export default function Signup() {
     setSuccessMessage("");
 
     const cleanName = fullName.trim();
+
     const cleanContact = contactNumber
       .trim()
       .replace(/[\s()-]/g, "");
+
     const cleanAddress = streetAddress.trim();
     const cleanEmail = email.trim().toLowerCase();
 
@@ -100,7 +103,7 @@ export default function Signup() {
         );
       }
 
-      // The database trigger creates public.users.
+      // Database trigger creates public.users.
       // No browser-side profile insert is needed.
       if (!authData.session) {
         setSuccessMessage(
@@ -134,31 +137,85 @@ export default function Signup() {
   }
 
   return (
-    <main className="flex min-h-[100dvh] w-full flex-col bg-white">
-      <div className="relative mx-auto w-full max-w-[430px] shrink-0 bg-white sm:my-auto">
-        {/* Red header */}
-        <header className="relative h-[200px] overflow-hidden bg-[#A61B1B]">
-          {/* Logo */}
+    <main
+      className="
+        flex min-h-[100dvh] w-full
+        items-center justify-center
+        overflow-x-hidden bg-white
+        md:bg-[#f4f7f5]
+        md:p-6 lg:p-8
+      "
+    >
+      <div
+        className="
+          relative flex min-h-[100dvh] w-full
+          flex-col overflow-hidden bg-white
+
+          md:min-h-0
+          md:max-w-[650px]
+          md:rounded-[28px]
+          md:shadow-xl
+
+          lg:min-h-[680px]
+          lg:max-w-[1100px]
+          lg:flex-row
+          lg:rounded-[30px]
+
+          xl:max-w-[1250px]
+        "
+      >
+        {/* HEADER / BRANDING */}
+        <header
+          className="
+            relative h-[200px] w-full
+            shrink-0 overflow-hidden
+            bg-[#A61B1B]
+
+            md:h-[240px]
+
+            lg:flex
+            lg:h-auto
+            lg:min-h-[680px]
+            lg:w-[48%]
+            lg:items-center
+            lg:justify-center
+
+            xl:w-1/2
+          "
+        >
+          {/* MOBILE LOGO */}
           <div
             className="
               absolute left-1/2 top-[58px] z-20
-              h-[126px] w-[100px] -translate-x-1/2
-              rounded-t-[28px] bg-white px-3 pt-3
+              h-[126px] w-[100px]
+              -translate-x-1/2
+              rounded-t-[28px]
+              bg-white px-3 pt-3
+
+              md:top-[75px]
+              lg:hidden
             "
           >
             <img
               src={img("waste-logo1.png")}
               alt="Waste Track Logo"
               draggable={false}
-              className="h-[106px] w-full object-contain"
+              className="
+                h-[106px] w-full
+                object-contain
+              "
             />
           </div>
 
-          {/* White curve */}
+          {/* MOBILE WHITE CURVE */}
           <svg
             viewBox="0 0 430 75"
             preserveAspectRatio="none"
-            className="absolute bottom-0 left-0 z-10 h-[75px] w-full"
+            className="
+              absolute bottom-0 left-0 z-10
+              h-[75px] w-full
+              lg:hidden
+            "
             aria-hidden="true"
           >
             <path
@@ -175,130 +232,282 @@ export default function Signup() {
               "
             />
           </svg>
-        </header>
 
-        {/* Signup form */}
-        <form
-          onSubmit={handleSignup}
-          aria-busy={loading}
-          className="relative z-30 bg-white px-5 pb-10 pt-1"
-        >
-          <div className="space-y-4">
-            <Field
-              label="Full Name"
-              icon={<UserRound size={17} />}
-              placeholder="Enter your full name"
-              value={fullName}
-              onChange={setFullName}
-              autoComplete="name"
-              maxLength={150}
-              disabled={loading}
-            />
-
-            <Field
-              label="Contact Number"
-              icon={<Phone size={17} />}
-              placeholder="09123456789"
-              type="tel"
-              value={contactNumber}
-              onChange={setContactNumber}
-              autoComplete="tel"
-              maxLength={25}
-              disabled={loading}
-            />
-
-            <Field
-              label="Street Address"
-              icon={<MapPin size={17} />}
-              placeholder="House number, street, barangay"
-              value={streetAddress}
-              onChange={setStreetAddress}
-              autoComplete="street-address"
-              maxLength={300}
-              disabled={loading}
-            />
-
-            <Field
-              label="Email Address"
-              icon={<Mail size={17} />}
-              placeholder="email@example.com"
-              type="email"
-              value={email}
-              onChange={setEmail}
-              autoComplete="email"
-              disabled={loading}
-            />
-
-            <Field
-              label="Password"
-              icon={<LockKeyhole size={17} />}
-              placeholder="At least 6 characters"
-              type="password"
-              value={password}
-              onChange={setPassword}
-              autoComplete="new-password"
-              password
-              minLength={6}
-              disabled={loading}
-            />
-          </div>
-
-          {errorMessage && (
-            <p
-              role="alert"
-              className="
-                mt-3 break-words rounded-lg border border-red-200
-                bg-red-50 p-3 text-sm leading-relaxed text-red-700
-              "
-            >
-              {errorMessage}
-            </p>
-          )}
-
-          {successMessage && (
-            <p
-              role="status"
-              className="
-                mt-3 break-words rounded-lg border border-green-200
-                bg-green-50 p-3 text-sm leading-relaxed text-green-700
-              "
-            >
-              {successMessage}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
+          {/* DESKTOP BRANDING */}
+          <div
             className="
-              mt-6 w-full rounded-full bg-[#d00000]
-              px-4 py-3 text-sm font-semibold text-white
-              transition-colors hover:bg-[#b90000]
-              focus-visible:outline focus-visible:outline-2
-              focus-visible:outline-offset-2 focus-visible:outline-red-600
-              active:scale-[0.99]
-              disabled:cursor-not-allowed disabled:opacity-60
+              hidden w-full flex-col
+              items-center justify-center
+              px-10 text-center text-white
+              lg:flex
             "
           >
-            {loading
-              ? "Creating Account..."
-              : "Create an Account"}
-          </button>
-
-          <p className="mt-5 text-center text-sm leading-relaxed text-neutral-700">
-            Already have an account?{" "}
-            <Link
-              to="/login"
-              className="font-bold text-[#007846] hover:underline"
+            <div
+              className="
+                mb-8 flex h-[180px] w-[180px]
+                items-center justify-center
+                rounded-[35px]
+                bg-white p-5 shadow-lg
+              "
             >
-              Log In
-            </Link>
-          </p>
-        </form>
+              <img
+                src={img("waste-logo1.png")}
+                alt="Waste Track Logo"
+                draggable={false}
+                className="
+                  h-full w-full
+                  object-contain
+                "
+              />
+            </div>
+
+            <h2
+              className="
+                text-4xl font-extrabold
+                tracking-wide
+                xl:text-5xl
+              "
+            >
+              Waste Track
+            </h2>
+
+            <p
+              className="
+                mt-5 max-w-[350px]
+                text-base leading-relaxed
+                text-white/90
+              "
+            >
+              Smart Waste Management and
+              Monitoring System
+            </p>
+
+            <div
+              className="
+                mt-8 h-1 w-20
+                rounded-full bg-white/70
+              "
+            />
+          </div>
+        </header>
+
+        {/* SIGNUP FORM SECTION */}
+        <section
+          className="
+            relative z-30 flex w-full
+            flex-1 flex-col bg-white
+
+            lg:w-[52%]
+            lg:items-center
+            lg:justify-center
+
+            xl:w-1/2
+          "
+        >
+          <form
+            onSubmit={handleSignup}
+            aria-busy={loading}
+            className="
+              relative w-full
+              px-5 pb-10 pt-1
+
+              sm:px-8
+
+              md:px-12
+              md:pb-12
+              md:pt-5
+
+              lg:mx-auto
+              lg:max-w-[490px]
+              lg:px-8
+              lg:py-10
+
+              xl:max-w-[520px]
+            "
+          >
+            {/* DESKTOP TITLE */}
+            <div
+              className="
+                mb-8 hidden
+                text-center lg:block
+              "
+            >
+              <h1
+                className="
+                  text-3xl font-bold
+                  text-[#A61B1B]
+                  xl:text-4xl
+                "
+              >
+                Create an Account
+              </h1>
+
+              <p
+                className="
+                  mt-3 text-sm
+                  text-neutral-500
+                "
+              >
+                Join Waste Track and start managing
+                waste efficiently.
+              </p>
+            </div>
+
+            {/* INPUT FIELDS */}
+            <div className="space-y-4 lg:space-y-5">
+              <Field
+                label="Full Name"
+                icon={<UserRound size={17} />}
+                placeholder="Enter your full name"
+                value={fullName}
+                onChange={setFullName}
+                autoComplete="name"
+                maxLength={150}
+                disabled={loading}
+              />
+
+              <Field
+                label="Contact Number"
+                icon={<Phone size={17} />}
+                placeholder="09123456789"
+                type="tel"
+                value={contactNumber}
+                onChange={setContactNumber}
+                autoComplete="tel"
+                maxLength={25}
+                disabled={loading}
+              />
+
+              <Field
+                label="Street Address"
+                icon={<MapPin size={17} />}
+                placeholder="House number, street, barangay"
+                value={streetAddress}
+                onChange={setStreetAddress}
+                autoComplete="street-address"
+                maxLength={300}
+                disabled={loading}
+              />
+
+              <Field
+                label="Email Address"
+                icon={<Mail size={17} />}
+                placeholder="email@example.com"
+                type="email"
+                value={email}
+                onChange={setEmail}
+                autoComplete="email"
+                disabled={loading}
+              />
+
+              <Field
+                label="Password"
+                icon={<LockKeyhole size={17} />}
+                placeholder="At least 6 characters"
+                type="password"
+                value={password}
+                onChange={setPassword}
+                autoComplete="new-password"
+                password
+                minLength={6}
+                disabled={loading}
+              />
+            </div>
+
+            {/* ERROR MESSAGE */}
+            {errorMessage && (
+              <p
+                role="alert"
+                className="
+                  mt-3 break-words rounded-lg
+                  border border-red-200
+                  bg-red-50 p-3
+                  text-sm leading-relaxed
+                  text-red-700
+                "
+              >
+                {errorMessage}
+              </p>
+            )}
+
+            {/* SUCCESS MESSAGE */}
+            {successMessage && (
+              <p
+                role="status"
+                className="
+                  mt-3 break-words rounded-lg
+                  border border-green-200
+                  bg-green-50 p-3
+                  text-sm leading-relaxed
+                  text-green-700
+                "
+              >
+                {successMessage}
+              </p>
+            )}
+
+            {/* CREATE ACCOUNT BUTTON */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="
+                mt-6 w-full rounded-full
+                bg-[#d00000]
+                px-4 py-3
+                text-sm font-semibold
+                text-white
+
+                transition-all
+                hover:bg-[#b90000]
+                active:scale-[0.99]
+
+                focus-visible:outline
+                focus-visible:outline-2
+                focus-visible:outline-offset-2
+                focus-visible:outline-red-600
+
+                disabled:cursor-not-allowed
+                disabled:opacity-60
+
+                lg:mt-8
+                lg:py-3.5
+                lg:text-base
+              "
+            >
+              {loading
+                ? "Creating Account..."
+                : "Create an Account"}
+            </button>
+
+            {/* LOGIN LINK */}
+            <p
+              className="
+                mt-5 text-center
+                text-sm leading-relaxed
+                text-neutral-700
+
+                lg:mt-6
+              "
+            >
+              Already have an account?{" "}
+              <Link
+                to="/login"
+                className="
+                  font-bold text-[#007846]
+                  hover:underline
+                "
+              >
+                Log In
+              </Link>
+            </p>
+          </form>
+        </section>
       </div>
     </main>
   );
 }
+
+/* REUSABLE INPUT FIELD */
 
 type FieldProps = {
   label: string;
@@ -328,31 +537,50 @@ function Field({
   disabled = false,
 }: FieldProps) {
   const id = useId();
-  const [showPassword, setShowPassword] = useState(false);
+
+  const [showPassword, setShowPassword] =
+    useState(false);
 
   const inputType =
-    password && showPassword ? "text" : type;
+    password && showPassword
+      ? "text"
+      : type;
 
   return (
     <div>
       <label
         htmlFor={id}
-        className="mb-1.5 block pl-1 text-sm font-medium text-neutral-600"
+        className="
+          mb-1.5 block pl-1
+          text-sm font-medium
+          text-neutral-600
+
+          lg:mb-2
+        "
       >
         {label}
       </label>
 
       <div
         className="
-          flex h-[34px] items-center gap-2
-          rounded-xl border border-[#b9e5ce]
-          px-2.5 text-neutral-500 transition-colors
+          flex h-[34px] items-center
+          gap-2 rounded-xl
+          border border-[#b9e5ce]
+          px-2.5 text-neutral-500
+          transition-colors
+
           focus-within:border-[#15965e]
+
+          lg:h-[48px]
+          lg:px-4
         "
       >
         <span
           aria-hidden="true"
-          className="flex shrink-0 items-center"
+          className="
+            flex shrink-0
+            items-center
+          "
         >
           {icon}
         </span>
@@ -376,8 +604,10 @@ function Field({
               : undefined
           }
           className="
-            h-full min-w-0 flex-1 bg-transparent
-            text-base text-neutral-800 outline-none
+            h-full min-w-0 flex-1
+            bg-transparent
+            text-base text-neutral-800
+            outline-none
             placeholder:text-neutral-500
             disabled:opacity-60
           "
@@ -388,7 +618,9 @@ function Field({
             type="button"
             disabled={disabled}
             onClick={() =>
-              setShowPassword((current) => !current)
+              setShowPassword(
+                (current) => !current
+              )
             }
             aria-controls={id}
             aria-pressed={showPassword}
@@ -398,10 +630,15 @@ function Field({
                 : "Show password"
             }
             className="
-              grid h-7 w-7 shrink-0 place-items-center rounded
-              text-neutral-500 hover:text-neutral-800
-              focus-visible:outline focus-visible:outline-2
+              grid h-7 w-7
+              shrink-0 place-items-center
+              rounded text-neutral-500
+              hover:text-neutral-800
+
+              focus-visible:outline
+              focus-visible:outline-2
               focus-visible:outline-green-700
+
               disabled:opacity-50
             "
           >
