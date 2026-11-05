@@ -269,9 +269,10 @@ export default function CollectorDashboard() {
         : "Good evening,";
 
   return (
-    <main className="flex h-[calc(100dvh-5rem)] min-h-0 flex-col overflow-hidden bg-white">
+    <main className="flex h-[calc(100dvh-5rem)] w-full flex-col overflow-hidden bg-white">
       {/* Header */}
-      <header className="relative isolate shrink-0 overflow-hidden rounded-b-[28px] bg-[#A61B1B] px-4 pb-6 pt-4 text-white sm:rounded-b-[40px] sm:px-6 sm:pb-8 sm:pt-6 lg:px-8">
+      <header className="dashboard-header relative isolate shrink-0 overflow-hidden rounded-b-[28px] bg-[#A61B1B] px-4 pb-6 pt-4 text-white sm:rounded-b-[40px] sm:px-6 sm:pb-8 sm:pt-6 lg:px-8">
+        {/* Water-caustic background */}
         <svg
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 -z-10 h-full w-full"
@@ -293,6 +294,7 @@ export default function CollectorDashboard() {
                 seed="8"
                 result="waterNoise"
               />
+
               <feDisplacementMap
                 in="SourceGraphic"
                 in2="waterNoise"
@@ -300,6 +302,7 @@ export default function CollectorDashboard() {
                 xChannelSelector="R"
                 yChannelSelector="G"
               />
+
               <feGaussianBlur stdDeviation="1.2" />
             </filter>
 
@@ -310,14 +313,25 @@ export default function CollectorDashboard() {
               patternUnits="userSpaceOnUse"
             >
               <path
-                d="M-20 35 Q20 5 60 30 T140 25 T200 40 M-20 100 Q25 65 65 95 T145 90 T200 110 M30 -20 Q5 30 35 70 T30 160 M110 -20 Q80 30 115 65 T110 160"
+                d="
+                  M-20 35 Q20 5 60 30 T140 25 T200 40
+                  M-20 100 Q25 65 65 95 T145 90 T200 110
+                  M30 -20 Q5 30 35 70 T30 160
+                  M110 -20 Q80 30 115 65 T110 160
+                "
                 fill="none"
                 stroke="#FF383C"
                 strokeWidth="12"
                 strokeOpacity="0.25"
               />
+
               <path
-                d="M-20 35 Q20 5 60 30 T140 25 T200 40 M-20 100 Q25 65 65 95 T145 90 T200 110 M30 -20 Q5 30 35 70 T30 160 M110 -20 Q80 30 115 65 T110 160"
+                d="
+                  M-20 35 Q20 5 60 30 T140 25 T200 40
+                  M-20 100 Q25 65 65 95 T145 90 T200 110
+                  M30 -20 Q5 30 35 70 T30 160
+                  M110 -20 Q80 30 115 65 T110 160
+                "
                 fill="none"
                 stroke="#FF383C"
                 strokeWidth="3"
@@ -327,6 +341,7 @@ export default function CollectorDashboard() {
           </defs>
 
           <rect width="100%" height="100%" fill="#A61B1B" />
+
           <rect
             x="-10%"
             y="-10%"
@@ -336,7 +351,7 @@ export default function CollectorDashboard() {
             filter={`url(#${filterId})`}
           />
         </svg>
-
+        
         <div className="mx-auto w-full max-w-3xl">
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2.5">
