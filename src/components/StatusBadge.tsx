@@ -1,0 +1,1 @@
+export default function StatusBadge({children,tone="red"}:{children:React.ReactNode;tone?: "red"|"orange"|"green"|"gray"}){const c={red:"bg-red-500 text-white",orange:"bg-amber-400 text-white",green:"bg-green-500 text-white",gray:"bg-neutral-300 text-neutral-700"}[tone];return <span className={`rounded-full px-2 py-0.5 text-[8px] font-bold ${c}`}>{children}</span>}
