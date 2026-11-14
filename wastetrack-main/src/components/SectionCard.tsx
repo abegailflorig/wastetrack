@@ -1,1 +1,0 @@
-import {ReactNode} from "react";export default function SectionCard({children,className=""}:{children:ReactNode;className?:string}){return <section className={`rounded-xl border border-red-200 bg-white p-3 soft-card ${className}`}>{children}</section>}

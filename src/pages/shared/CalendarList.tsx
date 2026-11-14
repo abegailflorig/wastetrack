@@ -15,8 +15,8 @@ import {
 import {
   ChevronLeft,
   ChevronRight,
-  Clock3,
   CircleAlert,
+  Clock3,
   MapPin,
   Trash2,
   UserRound,
@@ -63,6 +63,7 @@ export type Schedule = {
   name: string;
   address: string;
   image: string;
+  reportImage: string;
   time: string;
   completedTime?: string;
   status: CollectionStatus;
@@ -79,50 +80,62 @@ export type Schedule = {
 
 type ScheduleRow = {
   schedule_id: string;
-  site_id: string | null;
+  site_id: string;
   assigned_collector_id: string | null;
   source_report_id: string | null;
   date: string;
   collection_time: string | null;
-  collection_type: string | null;
-  status: string | null;
+  collection_type: string;
+  status: string;
   date_completed: string | null;
-  remarks: string | null;
 };
 
 type SiteRow = {
   site_id: string;
   site_name: string;
-  location: string | null;
+  location: string;
   site_image: string | null;
   qr_code: string | null;
-  latitude: number | null;
-  longitude: number | null;
+  latitude: number;
+  longitude: number;
+  assigned_collector: string | null;
 };
 
-type CollectorRow = {
+type UserRow = {
   user_id: string;
-  full_name: string | null;
+  full_name: string;
+  role: string;
+  is_active: boolean;
 };
 
 type ReportRow = {
   report_id: string;
+  site_id: string | null;
+  date_uploaded: string;
   cnn_detection_level: string | null;
   analyzed_at: string | null;
 };
 
 type CollectionRow = {
-  collection_id: string;
-  schedule_id: string | null;
-  collector_id: string | null;
-  collection_status: string | null;
-  completed_at: string | null;
+  schedule_id: string;
+  collector_id: string;
+  collection_status: "Collected" | "Not Collected";
+  completed_at: string;
+  remarks: string | null;
 };
 
-type DatedReportRow = {
-  date_uploaded: string;
-  cnn_detection_level: string | null;
+type StatusRow = {
+  report_id: string;
+  remarks: string | null;
+  created_at: string;
 };
+
+type LookupTable =
+  | "disposal_sites"
+  | "users"
+  | "waste_reports"
+  | "collections"
+  | "status";
 
 // ========================================
 // CONSTANTS
@@ -130,7 +143,7 @@ type DatedReportRow = {
 
 const PAGE_SIZE = 500;
 
-const COLUMNS = [
+const SCHEDULE_COLUMNS = [
   "schedule_id",
   "site_id",
   "assigned_collector_id",
@@ -140,39 +153,32 @@ const COLUMNS = [
   "collection_type",
   "status",
   "date_completed",
-  "remarks",
 ].join(",");
+
+// schedules.remarks is deliberately omitted.
+// That column does not exist in your schema.
 
 const DOT_COLORS: Record<Dot, string> = {
   collected: "bg-green-600",
-  pending: "bg-amber-500",
+  pending: "bg-amber-400",
   delayed: "bg-red-600",
   priority: "bg-red-600",
   scheduled: "bg-amber-400",
   open: "bg-[#9db77a]",
 };
 
-// ========================================
-// HELPERS
-// ========================================
-
 const norm = (value?: string | null) =>
   (value ?? "").trim().toLowerCase();
 
-const isCollected = (value?: string | null) =>
-  ["collected", "completed", "done"].includes(norm(value));
+// ========================================
+// DATE HELPERS
+// ========================================
 
-const isDelayed = (value?: string | null) =>
-  ["delayed", "late"].includes(norm(value));
-
-const isCancelled = (value?: string | null) =>
-  ["cancelled", "canceled"].includes(norm(value));
-
-export function dateKey(date: Date): string {
+export function dateKey(day: Date): string {
   return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
+    day.getFullYear(),
+    String(day.getMonth() + 1).padStart(2, "0"),
+    String(day.getDate()).padStart(2, "0"),
   ].join("-");
 }
 
@@ -181,60 +187,62 @@ export function parseDate(value?: string): Date {
     /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
 
   if (match) {
-    const result = new Date(
+    const date = new Date(
       Number(match[1]),
       Number(match[2]) - 1,
       Number(match[3])
     );
 
-    if (dateKey(result) === value) {
-      return result;
+    if (dateKey(date) === value) {
+      return date;
     }
   }
 
   return new Date();
 }
 
-// ========================================
-// STATUS BADGE COLORS
-// ========================================
-
-export function badgeColor(
-  type: Schedule["type"]
+function nextDate(
+  value: string,
+  days: number
 ): string {
-  if (type === "Priority Collection") {
-    return "bg-[#ed0015]";
-  }
+  const date = new Date(
+    `${value}T00:00:00.000Z`
+  );
 
-  if (type === "Scheduled") {
-    return "bg-[#ffbf42]";
-  }
+  date.setUTCDate(
+    date.getUTCDate() + days
+  );
 
-  return "bg-[#9db77a]";
+  return date.toISOString().slice(0, 10);
 }
 
-export function collectionStatusColor(
-  status: Schedule["status"]
-): string {
-  if (status === "Collected") return "bg-green-600";
-  if (status === "Delayed") return "bg-red-600";
-  if (status === "In Progress") return "bg-blue-600";
-  if (status === "Cancelled") return "bg-neutral-500";
+function philippineDate(value: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
 
-  return "bg-amber-500";
+  const part = (key: string) =>
+    parts.find((p) => p.type === key)?.value ?? "";
+
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
-// ========================================
-// FORMAT COLLECTION TIME
-// ========================================
+function phStart(value: string): string {
+  return new Date(
+    `${value}T00:00:00+08:00`
+  ).toISOString();
+}
 
-function formatTime(value: string | null): string {
-  if (!value) return "—";
-
-  const match = /^(\d{1,2}):(\d{2})/.exec(value);
+function timeLabel(value: string | null): string {
+  const match = value?.match(
+    /^(\d{1,2}):(\d{2})/
+  );
 
   if (!match || Number(match[1]) > 23) {
-    return value;
+    return value || "—";
   }
 
   const hour = Number(match[1]);
@@ -244,19 +252,14 @@ function formatTime(value: string | null): string {
   }`;
 }
 
-function formatCompletedTime(
+function completedLabel(
   value: string | null
 ): string | undefined {
-  if (
-    !value ||
-    /^\d{4}-\d{2}-\d{2}$/.test(value)
-  ) {
-    return undefined;
-  }
+  if (!value) return undefined;
 
   const date = new Date(value);
 
-  if (!Number.isFinite(date.getTime())) {
+  if (Number.isNaN(date.getTime())) {
     return undefined;
   }
 
@@ -268,27 +271,33 @@ function formatCompletedTime(
 }
 
 // ========================================
-// CNN WASTE LEVEL MAPPING
+// CNN LEVEL MAPPING
 // ========================================
 
-function levelOf(value?: string | null): Level {
-  if (["high", "full"].includes(norm(value))) {
+function wasteLevel(
+  value?: string | null
+): Level {
+  const level = norm(value);
+
+  if (
+    ["full", "high", "overflowing"].includes(level)
+  ) {
     return "FULL";
   }
 
   if (
     [
-      "medium",
       "near full",
       "near-full",
-      "half-full",
       "half full",
-    ].includes(norm(value))
+      "half-full",
+      "medium",
+    ].includes(level)
   ) {
     return "NEAR FULL";
   }
 
-  if (["low", "empty"].includes(norm(value))) {
+  if (["empty", "low"].includes(level)) {
     return "EMPTY";
   }
 
@@ -296,152 +305,96 @@ function levelOf(value?: string | null): Level {
 }
 
 // ========================================
-// COLLECTION TYPE
+// BADGE COLORS
 // ========================================
 
-function collectionType(
-  value: string | null,
-  level: Level
-): CollectionType {
-  if (norm(value) === "priority collection") {
-    return "Priority Collection";
+export function badgeColor(
+  value: CollectionType
+): string {
+  if (value === "Priority Collection") {
+    return "bg-[#ed0015]";
   }
 
-  if (norm(value) === "open for disposal") {
-    return "Open for Disposal";
+  if (value === "Scheduled") {
+    return "bg-[#ffbf42]";
   }
 
-  if (norm(value) === "scheduled") {
-    return "Scheduled";
+  return "bg-[#9db77a]";
+}
+
+export function collectionStatusColor(
+  value: CollectionStatus
+): string {
+  if (value === "Collected") {
+    return "bg-green-600";
   }
 
-  if (level === "FULL") {
-    return "Priority Collection";
+  if (value === "Delayed") {
+    return "bg-red-600";
   }
 
-  if (level === "EMPTY") {
-    return "Open for Disposal";
+  if (value === "In Progress") {
+    return "bg-blue-600";
   }
 
-  return "Scheduled";
+  if (value === "Cancelled") {
+    return "bg-neutral-500";
+  }
+
+  return "bg-[#ffbf42]";
 }
 
 // ========================================
-// COLLECTION STATUS
+// STATUS MAPPING
 // ========================================
 
-function mappedStatus(
+function actualStatus(
   schedule: ScheduleRow,
-  collections: CollectionRow[]
+  collection?: CollectionRow
 ): CollectionStatus {
-  const applicable = collections.filter(
-    (record) =>
-      !record.collector_id ||
-      record.collector_id === schedule.assigned_collector_id
-  );
+  // collections.collection_status supports:
+  // "Collected" and "Not Collected".
 
-  if (
-    applicable.some((item) =>
-      isCollected(item.collection_status)
-    )
-  ) {
+  if (collection?.collection_status === "Collected") {
     return "Collected";
   }
 
   if (
-    applicable.some((item) =>
-      isDelayed(item.collection_status)
-    )
+    collection?.collection_status === "Not Collected"
   ) {
     return "Delayed";
   }
 
-  if (applicable.length) {
-    if (
-      applicable.some(
-        (item) =>
-          norm(item.collection_status) === "in progress"
-      )
-    ) {
-      return "In Progress";
-    }
-
-    return "Pending";
+  if (schedule.status === "Collected") {
+    return "Collected";
   }
 
-  if (isCollected(schedule.status)) return "Collected";
-  if (isDelayed(schedule.status)) return "Delayed";
-  if (isCancelled(schedule.status)) return "Cancelled";
-
-  if (
-    ["in progress", "in_progress", "ongoing"].includes(
-      norm(schedule.status)
-    )
-  ) {
+  if (schedule.status === "In Progress") {
     return "In Progress";
+  }
+
+  if (schedule.status === "Cancelled") {
+    return "Cancelled";
   }
 
   return "Pending";
 }
 
-// ========================================
-// CALENDAR DOTS
-// ========================================
-
 function addDot(
-  markers: Record<string, Dot[]>,
+  map: Record<string, Dot[]>,
   date: string,
   dot: Dot
-) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-
-  if (!markers[date]) {
-    markers[date] = [];
+): void {
+  if (!map[date]) {
+    map[date] = [];
   }
 
-  if (!markers[date].includes(dot)) {
-    markers[date].push(dot);
+  if (!map[date].includes(dot)) {
+    map[date].push(dot);
   }
 }
 
-// ========================================
-// PHILIPPINE DATE HELPERS
-// ========================================
-
-function phDate(value: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Manila",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(value));
-
-  const get = (type: string) =>
-    parts.find((part) => part.type === type)?.value ?? "";
-
-  return `${get("year")}-${get("month")}-${get("day")}`;
-}
-
-function phStartOfDay(date: string): string {
-  return new Date(
-    `${date}T00:00:00+08:00`
-  ).toISOString();
-}
-
-function nextDate(
-  date: string,
-  days: number
-): string {
-  const value = new Date(
-    `${date}T00:00:00.000Z`
-  );
-
-  value.setUTCDate(value.getUTCDate() + days);
-
-  return value.toISOString().slice(0, 10);
-}
-
-function supabaseError(error: unknown): string {
+function messageOf(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
@@ -456,40 +409,53 @@ function supabaseError(error: unknown): string {
     );
   }
 
-  return "Unable to load schedules.";
+  return "Unable to load collection schedules.";
 }
 
 // ========================================
-// FETCH RELATED SUPABASE DATA
+// GENERIC SUPABASE QUERY
 // ========================================
 
 async function byIds<T>(
-  table:
-    | "disposal_sites"
-    | "users"
-    | "waste_reports"
-    | "collections",
+  table: LookupTable,
   columns: string,
   key: string,
-  ids: string[]
+  values: string[]
 ): Promise<T[]> {
-  const result: T[] = [];
+  const ids = [
+    ...new Set(values.filter(Boolean)),
+  ];
+
+  const all: T[] = [];
 
   for (let i = 0; i < ids.length; i += 50) {
-    for (let offset = 0; ; offset += PAGE_SIZE) {
+    for (
+      let offset = 0;
+      ;
+      offset += PAGE_SIZE
+    ) {
       const { data, error } = await supabase
         .from(table)
         .select(columns)
-        .in(key, ids.slice(i, i + 50))
-        .range(offset, offset + PAGE_SIZE - 1);
+        .in(
+          key,
+          ids.slice(i, i + 50)
+        )
+        .range(
+          offset,
+          offset + PAGE_SIZE - 1
+        );
 
       if (error) {
-        throw new Error(`${table}: ${error.message}`);
+        throw new Error(
+          `${table}: ${error.message}`
+        );
       }
 
-      const page = (data ?? []) as unknown as T[];
+      const page =
+        (data ?? []) as unknown as T[];
 
-      result.push(...page);
+      all.push(...page);
 
       if (page.length < PAGE_SIZE) {
         break;
@@ -497,155 +463,381 @@ async function byIds<T>(
     }
   }
 
-  return result;
+  return all;
 }
 
 // ========================================
-// CONNECT SCHEDULES TO SUPABASE
+// GET SCHEDULES
+// ========================================
+
+async function scheduleRows(
+  start: string,
+  endExclusive: string
+): Promise<ScheduleRow[]> {
+  const all: ScheduleRow[] = [];
+
+  for (
+    let offset = 0;
+    ;
+    offset += PAGE_SIZE
+  ) {
+    const { data, error } = await supabase
+      .from("schedules")
+      .select(SCHEDULE_COLUMNS)
+      .gte("date", start)
+      .lt("date", endExclusive)
+      .order("date", {
+        ascending: true,
+      })
+      .order("schedule_id", {
+        ascending: true,
+      })
+      .range(
+        offset,
+        offset + PAGE_SIZE - 1
+      );
+
+    if (error) {
+      throw new Error(
+        `schedules: ${error.message}`
+      );
+    }
+
+    const page =
+      (data ?? []) as unknown as ScheduleRow[];
+
+    all.push(...page);
+
+    if (page.length < PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return all.filter(
+    (row) => row.status !== "Cancelled"
+  );
+}
+
+// ========================================
+// GET LATEST REPORT PER SITE
+// ========================================
+
+async function latestReports(
+  siteIds: string[]
+): Promise<Map<string, ReportRow>> {
+  const reports = await Promise.all(
+    siteIds.map(async (siteId) => {
+      const { data, error } = await supabase
+        .from("waste_reports")
+        .select(
+          "report_id,site_id,date_uploaded,cnn_detection_level,analyzed_at"
+        )
+        .eq("site_id", siteId)
+        .order("date_uploaded", {
+          ascending: false,
+        })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(
+          `waste_reports: ${error.message}`
+        );
+      }
+
+      return data as ReportRow | null;
+    })
+  );
+
+  return new Map(
+    reports
+      .filter(
+        (report): report is ReportRow =>
+          Boolean(report)
+      )
+      .map((report) => [
+        report.site_id as string,
+        report,
+      ])
+  );
+}
+
+// ========================================
+// ENRICH SCHEDULES WITH RELATED TABLES
 // ========================================
 
 async function enrichSchedules(
   rows: ScheduleRow[]
 ): Promise<Schedule[]> {
-  if (!rows.length) return [];
+  if (!rows.length) {
+    return [];
+  }
 
-  const unique = (ids: Array<string | null>) => [
-    ...new Set(
-      ids.filter((id): id is string => Boolean(id))
-    ),
-  ];
+  const unique = (
+    items: Array<string | null>
+  ): string[] =>
+    [
+      ...new Set(
+        items.filter(
+          (value): value is string =>
+            Boolean(value)
+        )
+      ),
+    ];
 
   const [
     sites,
-    collectors,
-    reports,
-    collectionRows,
+    directReports,
+    collections,
   ] = await Promise.all([
     byIds<SiteRow>(
       "disposal_sites",
-      "site_id,site_name,location,site_image,qr_code,latitude,longitude",
+      "site_id,site_name,location,site_image,qr_code,latitude,longitude,assigned_collector",
       "site_id",
       unique(rows.map((row) => row.site_id))
     ),
 
-    byIds<CollectorRow>(
-      "users",
-      "user_id,full_name",
-      "user_id",
-      unique(
-        rows.map((row) => row.assigned_collector_id)
-      )
-    ),
-
     byIds<ReportRow>(
       "waste_reports",
-      "report_id,cnn_detection_level,analyzed_at",
+      "report_id,site_id,date_uploaded,cnn_detection_level,analyzed_at",
       "report_id",
       unique(
-        rows.map((row) => row.source_report_id)
+        rows.map(
+          (row) => row.source_report_id
+        )
       )
     ),
 
     byIds<CollectionRow>(
       "collections",
-      "collection_id,schedule_id,collector_id,collection_status,completed_at",
+      "schedule_id,collector_id,collection_status,completed_at,remarks",
       "schedule_id",
-      rows.map((row) => row.schedule_id)
+      rows.map(
+        (row) => row.schedule_id
+      )
     ),
   ]);
 
   const siteMap = new Map(
-    sites.map((item) => [item.site_id, item])
+    sites.map((site) => [
+      site.site_id,
+      site,
+    ])
+  );
+
+  // Collector IDs may come from schedules
+  // or disposal_sites.assigned_collector.
+
+  const users = await byIds<UserRow>(
+    "users",
+    "user_id,full_name,role,is_active",
+    "user_id",
+    unique([
+      ...rows.map(
+        (row) => row.assigned_collector_id
+      ),
+      ...sites.map(
+        (site) => site.assigned_collector
+      ),
+    ])
   );
 
   const userMap = new Map(
-    collectors.map((item) => [item.user_id, item])
+    users.map((user) => [
+      user.user_id,
+      user,
+    ])
   );
 
-  const reportMap = new Map(
-    reports.map((item) => [item.report_id, item])
+  const directMap = new Map(
+    directReports.map((report) => [
+      report.report_id,
+      report,
+    ])
   );
 
-  const collectionMap = new Map<
+  const recentMap = await latestReports(
+    unique(
+      rows
+        .filter(
+          (row) => !row.source_report_id
+        )
+        .map((row) => row.site_id)
+    )
+  );
+
+  const collectionMap = new Map(
+    collections.map((collection) => [
+      collection.schedule_id,
+      collection,
+    ])
+  );
+
+  const relevantReports = rows.flatMap(
+    (row) => {
+      const report = row.source_report_id
+        ? directMap.get(row.source_report_id)
+        : recentMap.get(row.site_id);
+
+      return report ? [report] : [];
+    }
+  );
+
+  const statuses = await byIds<StatusRow>(
+    "status",
+    "report_id,remarks,created_at",
+    "report_id",
+    unique(
+      relevantReports.map(
+        (report) => report.report_id
+      )
+    )
+  ).catch((error) => {
+    console.warn(
+      "[WasteTrack] Report remarks unavailable:",
+      messageOf(error)
+    );
+
+    return [] as StatusRow[];
+  });
+
+  const statusMap = new Map<
     string,
-    CollectionRow[]
+    StatusRow
   >();
 
-  for (const record of collectionRows) {
-    if (!record.schedule_id) continue;
-
-    collectionMap.set(record.schedule_id, [
-      ...(collectionMap.get(record.schedule_id) ?? []),
-      record,
-    ]);
+  for (
+    const item of [...statuses].sort(
+      (a, b) =>
+        b.created_at.localeCompare(
+          a.created_at
+        )
+    )
+  ) {
+    if (!statusMap.has(item.report_id)) {
+      statusMap.set(
+        item.report_id,
+        item
+      );
+    }
   }
 
   return rows.map((row) => {
-    const site = row.site_id
-      ? siteMap.get(row.site_id)
-      : undefined;
+    const site = siteMap.get(
+      row.site_id
+    );
 
     const report = row.source_report_id
-      ? reportMap.get(row.source_report_id)
+      ? directMap.get(
+          row.source_report_id
+        )
+      : recentMap.get(
+          row.site_id
+        );
+
+    const collection = collectionMap.get(
+      row.schedule_id
+    );
+
+    const assignedId =
+      row.assigned_collector_id ??
+      site?.assigned_collector ??
+      null;
+
+    const collector = assignedId
+      ? userMap.get(assignedId)
       : undefined;
 
-    const records =
-      collectionMap.get(row.schedule_id) ?? [];
+    const collectorName =
+      collector?.role === "collector" &&
+      collector.is_active
+        ? collector.full_name
+        : assignedId
+          ? "Assigned collector"
+          : "Unassigned";
 
-    const status = mappedStatus(row, records);
+    const completed =
+      collection?.collection_status === "Collected"
+        ? collection.completed_at
+        : row.status === "Collected"
+          ? row.date_completed
+          : null;
 
-    const level = levelOf(
-      report?.cnn_detection_level
-    );
-
-    const completed = records.find(
-      (record) =>
-        isCollected(record.collection_status) &&
-        (
-          !record.collector_id ||
-          record.collector_id ===
-            row.assigned_collector_id
-        )
-    );
+    const collectionType: CollectionType =
+      row.collection_type === "Priority Collection" ||
+      row.collection_type === "Open for Disposal"
+        ? row.collection_type
+        : "Scheduled";
 
     return {
       id: row.schedule_id,
-      siteId: row.site_id ?? "",
-      assignedCollectorId: row.assigned_collector_id,
+
+      siteId: row.site_id,
+
+      assignedCollectorId: assignedId,
+
       date: row.date,
 
       name:
-        site?.site_name || "Waste Disposal Site",
+        site?.site_name ??
+        "Waste Disposal Site",
 
       address:
-        site?.location || "Location not available",
+        site?.location ??
+        "Location unavailable",
 
-      // Preserve site image for ScheduleDetails.tsx
-      image: site?.site_image || "",
+      image:
+        site?.site_image ?? "",
 
-      time: formatTime(row.collection_time),
+      // Actual before-collection photo
+      // is loaded in WasteCollection.tsx.
+      reportImage: "",
 
-      completedTime: formatCompletedTime(
-        completed?.completed_at ??
-          row.date_completed
+      time: timeLabel(
+        row.collection_time
       ),
 
-      status,
-      type: collectionType(row.collection_type, level),
-      level,
+      completedTime:
+        completedLabel(completed),
+
+      status:
+        actualStatus(
+          row,
+          collection
+        ),
+
+      type: collectionType,
+
+      level: wasteLevel(
+        report?.cnn_detection_level
+      ),
 
       confidence: "Unavailable",
-      analyzedAt: report?.analyzed_at ?? null,
 
-      collector: row.assigned_collector_id
-        ? userMap.get(row.assigned_collector_id)
-            ?.full_name || "Assigned collector"
-        : "Unassigned",
+      analyzedAt:
+        report?.analyzed_at ?? null,
 
-      qrCode: site?.qr_code || "",
-      latitude: site?.latitude ?? 0,
-      longitude: site?.longitude ?? 0,
-      remarks: row.remarks || "",
+      collector: collectorName,
+
+      qrCode:
+        site?.qr_code ?? "",
+
+      latitude:
+        site?.latitude ?? 0,
+
+      longitude:
+        site?.longitude ?? 0,
+
+      remarks:
+        collection?.remarks ??
+        (
+          report
+            ? statusMap.get(
+                report.report_id
+              )?.remarks
+            : null
+        ) ??
+        "",
     };
   });
 }
@@ -658,102 +850,86 @@ export async function getScheduleById(
   scheduleId: string,
   collectorId?: string
 ): Promise<Schedule | null> {
-  let query = supabase
+  const { data, error } = await supabase
     .from("schedules")
-    .select(COLUMNS)
-    .eq("schedule_id", scheduleId);
+    .select(SCHEDULE_COLUMNS)
+    .eq(
+      "schedule_id",
+      scheduleId
+    )
+    .maybeSingle();
 
-  if (collectorId) {
-    query = query.eq(
-      "assigned_collector_id",
-      collectorId
+  if (error) {
+    throw new Error(
+      `schedules: ${error.message}`
     );
   }
 
-  const { data, error } = await query.maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
+  if (!data) {
+    return null;
   }
 
-  if (!data) return null;
-
-  const result = await enrichSchedules([
+  const [schedule] = await enrichSchedules([
     data as unknown as ScheduleRow,
   ]);
 
-  return result[0] ?? null;
-}
-
-// ========================================
-// FETCH SCHEDULES
-// ========================================
-
-async function getScheduledRows(
-  start: string,
-  endExclusive: string,
-  collectorId?: string
-): Promise<ScheduleRow[]> {
-  const result: ScheduleRow[] = [];
-
-  for (let offset = 0; ; offset += PAGE_SIZE) {
-    let query = supabase
-      .from("schedules")
-      .select(COLUMNS)
-      .gte("date", start)
-      .lt("date", endExclusive);
-
-    if (collectorId) {
-      query = query.eq(
-        "assigned_collector_id",
-        collectorId
-      );
-    }
-
-    const { data, error } = await query
-      .order("date", { ascending: true })
-      .order("schedule_id", { ascending: true })
-      .range(offset, offset + PAGE_SIZE - 1);
-
-    if (error) {
-      throw new Error(
-        `schedules: ${error.message}`
-      );
-    }
-
-    const page =
-      (data ?? []) as unknown as ScheduleRow[];
-
-    result.push(...page);
-
-    if (page.length < PAGE_SIZE) {
-      break;
-    }
+  if (!schedule) {
+    return null;
   }
 
-  return result.filter(
-    (item) => !isCancelled(item.status)
-  );
+  if (
+    collectorId &&
+    schedule.assignedCollectorId !== collectorId
+  ) {
+    return null;
+  }
+
+  return schedule;
 }
 
 // ========================================
-// RESIDENT CNN REPORT DOTS
+// REPORT DOTS FOR THE WEEK
 // ========================================
 
-async function getReportsForWeek(
+async function reportsForWeek(
   start: string,
-  endExclusive: string
-): Promise<DatedReportRow[]> {
-  const result: DatedReportRow[] = [];
+  end: string
+): Promise<
+  {
+    date_uploaded: string;
+    cnn_detection_level: string | null;
+  }[]
+> {
+  const all: {
+    date_uploaded: string;
+    cnn_detection_level: string | null;
+  }[] = [];
 
-  for (let offset = 0; ; offset += PAGE_SIZE) {
+  for (
+    let offset = 0;
+    ;
+    offset += PAGE_SIZE
+  ) {
     const { data, error } = await supabase
       .from("waste_reports")
-      .select("date_uploaded,cnn_detection_level")
-      .gte("date_uploaded", phStartOfDay(start))
-      .lt("date_uploaded", phStartOfDay(endExclusive))
-      .order("date_uploaded", { ascending: true })
-      .range(offset, offset + PAGE_SIZE - 1);
+      .select(
+        "date_uploaded,cnn_detection_level"
+      )
+      .gte(
+        "date_uploaded",
+        phStart(start)
+      )
+      .lt(
+        "date_uploaded",
+        phStart(end)
+      )
+      .order("date_uploaded", {
+        ascending: true,
+      })
+      .range(
+        offset,
+        offset + PAGE_SIZE - 1
+      );
 
     if (error) {
       throw new Error(
@@ -761,82 +937,86 @@ async function getReportsForWeek(
       );
     }
 
-    const page =
-      (data ?? []) as unknown as DatedReportRow[];
+    const page = (data ?? []) as {
+      date_uploaded: string;
+      cnn_detection_level: string | null;
+    }[];
 
-    result.push(...page);
+    all.push(...page);
 
     if (page.length < PAGE_SIZE) {
       break;
     }
   }
 
-  return result;
+  return all;
 }
 
 // ========================================
-// MAIN CALENDAR LIST COMPONENT
+// MAIN COMPONENT
 // ========================================
 
 export default function CalendarList({
   role,
 }: Props) {
   const { date } = useParams();
+
   const location = useLocation();
+
   const navigate = useNavigate();
 
-  // ========================================
-  // DETECT RESIDENT OR COLLECTOR
-  // ========================================
-
   const currentRole: Role =
-    role ||
+    role ??
     (
       location.pathname.startsWith("/collector")
         ? "collector"
         : "resident"
     );
 
-  const resident = currentRole === "resident";
-
-  // ========================================
-  // SELECTED DATE
-  // ========================================
+  const resident =
+    currentRole === "resident";
 
   const selected = parseDate(date);
-  const selectedKey = dateKey(selected);
 
-  const today = phDate(
+  const selectedKey =
+    dateKey(selected);
+
+  const today = philippineDate(
     new Date().toISOString()
   );
-
-  // ========================================
-  // STATES
-  // ========================================
 
   const [items, setItems] =
     useState<Schedule[]>([]);
 
-  const [dateDots, setDateDots] =
+  const [dots, setDots] =
     useState<Record<string, Dot[]>>({});
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
-  const requestRef = useRef(0);
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
+
+  const [refresh, setRefresh] =
+    useState(0);
+
+  const requestId = useRef(0);
 
   // ========================================
-  // WEEK AND MONTH
+  // SELECTED WEEK / MONTH
   // ========================================
 
-  const weekStart = new Date(
-    selected.getFullYear(),
-    selected.getMonth(),
-    selected.getDate() - selected.getDay()
+  const weekStart = dateKey(
+    new Date(
+      selected.getFullYear(),
+      selected.getMonth(),
+      selected.getDate() -
+        selected.getDay()
+    )
   );
 
-  const weekStartKey = dateKey(weekStart);
-  const weekEndKey = nextDate(weekStartKey, 7);
+  const weekEnd =
+    nextDate(weekStart, 7);
 
   const monthStart = dateKey(
     new Date(
@@ -854,27 +1034,26 @@ export default function CalendarList({
     )
   );
 
-  const week = useMemo(
-    () =>
-      Array.from(
-        { length: 7 },
-        (_, index) =>
-          new Date(
-            weekStart.getFullYear(),
-            weekStart.getMonth(),
-            weekStart.getDate() + index
-          )
-      ),
-    [weekStartKey]
-  );
+  const weekDays = useMemo(() => {
+    const first =
+      parseDate(weekStart);
 
-  // Residents see the month's schedules.
-  // Collectors see selected-date assignments.
+    return Array.from(
+      { length: 7 },
+      (_, index) =>
+        new Date(
+          first.getFullYear(),
+          first.getMonth(),
+          first.getDate() + index
+        )
+    );
+  }, [weekStart]);
 
-  const visibleItems = resident
+  const visible = resident
     ? items
     : items.filter(
-        (item) => item.date === selectedKey
+        (item) =>
+          item.date === selectedKey
       );
 
   // ========================================
@@ -887,26 +1066,30 @@ export default function CalendarList({
     } = supabase.auth.onAuthStateChange(
       (event) => {
         if (
-          event === "SIGNED_IN" ||
-          event === "SIGNED_OUT" ||
-          event === "USER_UPDATED"
+          [
+            "SIGNED_IN",
+            "SIGNED_OUT",
+            "USER_UPDATED",
+          ].includes(event)
         ) {
-          setRefreshKey(
+          setRefresh(
             (value) => value + 1
           );
         }
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () =>
+      subscription.unsubscribe();
   }, []);
 
   // ========================================
-  // LOAD SUPABASE DATA
+  // LOAD SUPABASE RECORDS
   // ========================================
 
   const load = useCallback(async () => {
-    const id = ++requestRef.current;
+    const myRequest =
+      ++requestId.current;
 
     setLoading(true);
     setError("");
@@ -917,28 +1100,37 @@ export default function CalendarList({
         error: authError,
       } = await supabase.auth.getUser();
 
-      if (authError) throw authError;
-
-      if (!auth.user) {
-        throw new Error("Please sign in.");
+      if (authError) {
+        throw authError;
       }
 
-      // Verify authenticated user's role.
+      if (!auth.user) {
+        throw new Error(
+          "Please sign in."
+        );
+      }
 
       const {
         data: profile,
         error: profileError,
       } = await supabase
         .from("users")
-        .select("role,is_active")
-        .eq("user_id", auth.user.id)
+        .select(
+          "role,is_active"
+        )
+        .eq(
+          "user_id",
+          auth.user.id
+        )
         .maybeSingle();
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        throw profileError;
+      }
 
       if (
         !profile ||
-        norm(profile.role) !== currentRole ||
+        profile.role !== currentRole ||
         profile.is_active === false
       ) {
         throw new Error(
@@ -946,28 +1138,38 @@ export default function CalendarList({
         );
       }
 
-      // Fetch schedules based on role.
+      const rows = await scheduleRows(
+        resident
+          ? monthStart
+          : weekStart,
 
-      const raw = await getScheduledRows(
-        resident ? monthStart : weekStartKey,
-        resident ? monthEnd : weekEndKey,
-        resident ? undefined : auth.user.id
+        resident
+          ? monthEnd
+          : weekEnd
       );
 
-      // Join Supabase records.
+      const all =
+        await enrichSchedules(rows);
 
-      const records = await enrichSchedules(raw);
+      // Collector only sees their own schedules.
 
-      const markers: Record<string, Dot[]> = {};
+      const records = resident
+        ? all
+        : all.filter(
+            (item) =>
+              item.assignedCollectorId ===
+              auth.user!.id
+          );
 
-      // ========================================
-      // CALENDAR STATUS DOTS
-      // ========================================
+      const markers: Record<
+        string,
+        Dot[]
+      > = {};
 
       for (const item of records) {
         if (
-          item.date < weekStartKey ||
-          item.date >= weekEndKey
+          item.date < weekStart ||
+          item.date >= weekEnd
         ) {
           continue;
         }
@@ -995,42 +1197,48 @@ export default function CalendarList({
         }
       }
 
-      // ========================================
-      // RESIDENT CNN REPORT DOTS
-      // ========================================
-
       if (resident) {
-        const datedReports =
-          await getReportsForWeek(
-            weekStartKey,
-            weekEndKey
+        const reports =
+          await reportsForWeek(
+            weekStart,
+            weekEnd
           );
 
-        for (const report of datedReports) {
-          const level = levelOf(
+        for (const report of reports) {
+          const level = wasteLevel(
             report.cnn_detection_level
           );
 
-          if (!level) continue;
-
-          addDot(
-            markers,
-            phDate(report.date_uploaded),
-            level === "FULL"
-              ? "priority"
-              : level === "NEAR FULL"
-                ? "scheduled"
-                : "open"
-          );
+          if (level) {
+            addDot(
+              markers,
+              philippineDate(
+                report.date_uploaded
+              ),
+              level === "FULL"
+                ? "priority"
+                : level === "NEAR FULL"
+                  ? "scheduled"
+                  : "open"
+            );
+          }
         }
       }
 
-      if (id !== requestRef.current) return;
+      if (
+        myRequest !== requestId.current
+      ) {
+        return;
+      }
 
       setItems(records);
-      setDateDots(markers);
+      setDots(markers);
     } catch (failure) {
-      if (id !== requestRef.current) return;
+      if (
+        myRequest !== requestId.current
+      ) {
+        return;
+      }
 
       console.error(
         "[WasteTrack] CalendarList:",
@@ -1038,10 +1246,14 @@ export default function CalendarList({
       );
 
       setItems([]);
-      setDateDots({});
-      setError(supabaseError(failure));
+      setDots({});
+      setError(
+        messageOf(failure)
+      );
     } finally {
-      if (id === requestRef.current) {
+      if (
+        myRequest === requestId.current
+      ) {
         setLoading(false);
       }
     }
@@ -1050,9 +1262,9 @@ export default function CalendarList({
     resident,
     monthStart,
     monthEnd,
-    weekStartKey,
-    weekEndKey,
-    refreshKey,
+    weekStart,
+    weekEnd,
+    refresh,
   ]);
 
   // ========================================
@@ -1062,19 +1274,31 @@ export default function CalendarList({
   useEffect(() => {
     void load();
 
-    const timer = window.setInterval(
-      () => void load(),
-      60_000
+    const interval =
+      window.setInterval(
+        () => void load(),
+        60_000
+      );
+
+    const focus = () =>
+      void load();
+
+    window.addEventListener(
+      "focus",
+      focus
     );
 
-    const onFocus = () => void load();
-
-    window.addEventListener("focus", onFocus);
-
     return () => {
-      requestRef.current += 1;
-      window.clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
+      requestId.current += 1;
+
+      window.clearInterval(
+        interval
+      );
+
+      window.removeEventListener(
+        "focus",
+        focus
+      );
     };
   }, [load]);
 
@@ -1083,28 +1307,32 @@ export default function CalendarList({
   // ========================================
 
   useEffect(() => {
-    let timer:
-      ReturnType<typeof setTimeout> | undefined;
+    let debounce:
+      | ReturnType<typeof setTimeout>
+      | undefined;
 
     const changed = () => {
-      if (timer) clearTimeout(timer);
+      if (debounce) {
+        clearTimeout(debounce);
+      }
 
-      timer = setTimeout(
+      debounce = setTimeout(
         () => void load(),
         500
       );
     };
 
     const channel = supabase.channel(
-      `calendar-list-mobile-${currentRole}-${weekStartKey}`
+      `calendar-list-${currentRole}-${weekStart}`
     );
 
     const tables = [
       "schedules",
-      "collections",
-      "waste_reports",
       "disposal_sites",
       "users",
+      "waste_reports",
+      "status",
+      "collections",
     ];
 
     for (const table of tables) {
@@ -1122,14 +1350,17 @@ export default function CalendarList({
     channel.subscribe();
 
     return () => {
-      if (timer) clearTimeout(timer);
+      if (debounce) {
+        clearTimeout(debounce);
+      }
 
-      void supabase.removeChannel(channel);
+      void supabase.removeChannel(
+        channel
+      );
     };
   }, [
     currentRole,
-    resident,
-    weekStartKey,
+    weekStart,
     load,
   ]);
 
@@ -1138,20 +1369,19 @@ export default function CalendarList({
   // ========================================
 
   function selectDay(day: Date) {
-    const clickedDate = dateKey(day);
+    const dateToOpen =
+      dateKey(day);
 
-    // Clicking the selected date again
-    // returns to Calendar.tsx.
+    if (dateToOpen === selectedKey) {
+      navigate(
+        `/${currentRole}/calendar`
+      );
 
-    if (clickedDate === selectedKey) {
-      navigate(`/${currentRole}/calendar`);
       return;
     }
 
-    // Clicking a different date opens its list.
-
     navigate(
-      `/${currentRole}/calendar/list/${clickedDate}`
+      `/${currentRole}/calendar/list/${dateToOpen}`
     );
   }
 
@@ -1160,97 +1390,80 @@ export default function CalendarList({
       new Date(
         selected.getFullYear(),
         selected.getMonth(),
-        selected.getDate() + direction * 7
+        selected.getDate() +
+          7 * direction
       )
     );
   }
 
   // ========================================
-  // RESPONSIVE CALENDAR UI
+  // UI
   // ========================================
 
   return (
     <main
       className="
-        flex h-[calc(100dvh-5rem)] min-h-[420px]
-        w-full flex-col overflow-hidden
+        flex h-[calc(100dvh-5rem)]
+        min-h-[420px] w-full
+        flex-col overflow-hidden
         bg-white text-[#222]
       "
     >
       <section
         className="
-          mx-auto flex min-h-0 w-full max-w-[460px]
-          flex-1 flex-col px-3 pt-3
+          mx-auto flex min-h-0 w-full
+          max-w-[460px] flex-1 flex-col
+          px-3 pt-3
           pb-[max(10px,env(safe-area-inset-bottom))]
-          min-[360px]:px-4
-          min-[480px]:pt-6
+          sm:px-4 sm:pt-6
         "
       >
-        {/* ========================================
-            RED HEADER
-        ======================================== */}
+        {/* RED HEADER */}
 
         <header
           className="
-            shrink-0 rounded-t-[9px]
-            bg-[#c40000] px-2.5
-            pb-[27px] pt-2
-            min-[360px]:rounded-t-xl
-            min-[360px]:px-4
-            min-[360px]:pb-8
-            min-[360px]:pt-3
+            shrink-0 rounded-t-lg
+            bg-[#c40000] px-2
+            pb-7 pt-2
+            sm:rounded-t-xl
+            sm:px-4 sm:pb-8 sm:pt-3
           "
         >
           <h1
             className="
-              text-[12px] font-extrabold leading-[16px]
-              text-white
-              min-[360px]:text-[18px]
-              min-[360px]:leading-6
+              text-[13px] font-extrabold
+              text-white sm:text-lg
             "
           >
             Collection Schedule
           </h1>
         </header>
 
-        {/* ========================================
-            WHITE CONTENT PANEL
-        ======================================== */}
-
         <div
           className="
-            relative -mt-[16px] flex min-h-0
-            flex-1 flex-col rounded-t-[11px]
+            relative -mt-3 flex min-h-0
+            flex-1 flex-col rounded-t-xl
             bg-white px-2 pt-3
-            min-[360px]:-mt-4
-            min-[360px]:rounded-t-2xl
-            min-[360px]:px-3
-            min-[360px]:pt-4
+            sm:-mt-4 sm:rounded-t-2xl
+            sm:px-3 sm:pt-4
           "
         >
-          {/* ========================================
-              WEEKLY CALENDAR
-          ======================================== */}
+          {/* WEEKLY CALENDAR */}
 
           <section
             aria-label="Weekly collection calendar"
             className="
-              shrink-0 rounded-[11px]
-              border border-[#cecece] bg-white
-              px-[3px] pb-[5px]
-              shadow-[0_2px_3px_rgba(0,0,0,0.13)]
-              min-[360px]:rounded-2xl
-              min-[360px]:px-2
-              min-[360px]:pb-2
+              shrink-0 rounded-xl
+              border border-[#cecece]
+              bg-white px-1 pb-1.5
+              shadow-[0_2px_3px_rgba(0,0,0,0.15)]
+              sm:px-2 sm:pb-2
             "
           >
-            {/* MONTH AND NAVIGATION */}
-
             <div
               className="
-                flex h-[34px] items-center
-                justify-between
-                min-[360px]:h-[44px]
+                flex h-9 items-center
+                justify-between sm:h-11
               "
             >
               <button
@@ -1258,40 +1471,27 @@ export default function CalendarList({
                 onClick={() => moveWeek(-1)}
                 aria-label="Previous week"
                 className="
-                  grid h-[30px] w-[30px]
-                  shrink-0 place-items-center
+                  grid h-9 w-9 place-items-center
                   rounded-full hover:bg-red-50
-                  focus-visible:outline
-                  focus-visible:outline-2
-                  focus-visible:outline-red-500
-                  min-[360px]:h-10
-                  min-[360px]:w-10
                 "
               >
-                <ChevronLeft
-                  className="
-                    h-[15px] w-[15px]
-                    min-[360px]:h-5
-                    min-[360px]:w-5
-                  "
-                />
+                <ChevronLeft size={18} />
               </button>
 
               <Link
                 to={`/${currentRole}/calendar`}
-                aria-label="Open full calendar"
                 className="
-                  min-w-0 text-center
-                  text-[11px] font-extrabold
-                  leading-tight text-[#191919]
-                  hover:underline
-                  min-[360px]:text-[17px]
+                  text-[12px] font-extrabold
+                  text-[#191919] sm:text-base
                 "
               >
-                {selected.toLocaleDateString("en-US", {
-                  month: "long",
-                  year: "numeric",
-                })}
+                {selected.toLocaleDateString(
+                  "en-US",
+                  {
+                    month: "long",
+                    year: "numeric",
+                  }
+                )}
               </Link>
 
               <button
@@ -1299,129 +1499,109 @@ export default function CalendarList({
                 onClick={() => moveWeek(1)}
                 aria-label="Next week"
                 className="
-                  grid h-[30px] w-[30px]
-                  shrink-0 place-items-center
+                  grid h-9 w-9 place-items-center
                   rounded-full hover:bg-red-50
-                  focus-visible:outline
-                  focus-visible:outline-2
-                  focus-visible:outline-red-500
-                  min-[360px]:h-10
-                  min-[360px]:w-10
                 "
               >
-                <ChevronRight
-                  className="
-                    h-[15px] w-[15px]
-                    min-[360px]:h-5
-                    min-[360px]:w-5
-                  "
-                />
+                <ChevronRight size={18} />
               </button>
             </div>
 
-            {/* ========================================
-                WEEKDAYS AND DATES
-            ======================================== */}
-
-            <div className="grid grid-cols-7 text-center">
-              {week.map((day) => {
-                const key = dateKey(day);
-
-                const isSelected = key === selectedKey;
-                const isToday = key === today;
+            <div
+              className="
+                grid grid-cols-7 text-center
+              "
+            >
+              {weekDays.map((day) => {
+                const key =
+                  dateKey(day);
 
                 return (
                   <div
                     key={key}
                     className="min-w-0"
                   >
-                    {/* WEEKDAY */}
-
                     <p
                       className="
-                        py-0.5 text-[9px]
-                        font-normal leading-3 text-[#222]
-                        min-[360px]:py-1
-                        min-[360px]:text-[12px]
-                        min-[360px]:font-medium
+                        py-1 text-[10px] leading-3
+                        sm:text-xs
                       "
                     >
-                      {day.toLocaleDateString("en-US", {
-                        weekday: "short",
-                      })}
+                      {day.toLocaleDateString(
+                        "en-US",
+                        {
+                          weekday: "short",
+                        }
+                      )}
                     </p>
-
-                    {/* DATE BUTTON */}
 
                     <button
                       type="button"
-                      onClick={() => selectDay(day)}
-                      aria-pressed={isSelected}
+                      aria-pressed={
+                        key === selectedKey
+                      }
                       aria-current={
-                        isToday ? "date" : undefined
+                        key === today
+                          ? "date"
+                          : undefined
                       }
                       aria-label={day.toLocaleDateString(
                         "en-US",
-                        { dateStyle: "full" }
+                        {
+                          dateStyle: "full",
+                        }
                       )}
+                      onClick={() => selectDay(day)}
                       className="
-                        flex h-[27px] w-full
-                        min-w-0 flex-col
-                        items-center justify-center
-                        rounded-md hover:bg-red-50
+                        flex h-9 w-full
+                        flex-col items-center
+                        justify-center rounded-md
+                        hover:bg-red-50
                         focus-visible:outline
                         focus-visible:outline-2
-                        focus-visible:outline-red-500
-                        min-[360px]:h-[39px]
+                        focus-visible:outline-red-600
+                        sm:h-10
                       "
                     >
-                      {/* SELECTED DAY */}
-
                       <span
                         className={`
-                          grid h-[17px] w-[17px]
-                          place-items-center rounded-full
-                          text-[9px] leading-none
-                          min-[360px]:h-[25px]
-                          min-[360px]:w-[25px]
-                          min-[360px]:text-[13px]
+                          grid h-5 w-5
+                          place-items-center
+                          rounded-full
+                          text-[11px]
+                          sm:h-6 sm:w-6
+                          sm:text-[13px]
                           ${
-                            isSelected
-                              ? "bg-[#ff9ba8] font-semibold"
-                              : "font-medium"
+                            key === selectedKey
+                              ? "bg-[#ff9ba8] font-bold"
+                              : ""
                           }
                           ${
-                            isToday
-                              ? "text-[#225dc8]"
-                              : "text-[#111]"
+                            key === today
+                              ? "text-blue-700"
+                              : "text-black"
                           }
                         `}
                       >
                         {day.getDate()}
                       </span>
 
-                      {/* STATUS DOTS */}
-
                       <span
                         aria-hidden="true"
                         className="
-                          mt-px flex h-[5px]
+                          mt-0.5 flex h-1.5
                           items-center justify-center
-                          gap-[2px]
-                          min-[360px]:h-[7px]
-                          min-[360px]:gap-[3px]
+                          gap-0.5
                         "
                       >
-                        {(dateDots[key] ?? [])
+                        {(dots[key] ?? [])
                           .slice(0, 3)
                           .map((dot) => (
                             <span
                               key={dot}
                               className={`
-                                h-[4px] w-[4px]
+                                h-[5px] w-[5px]
                                 rounded-full
-                                min-[360px]:h-[6px]
-                                min-[360px]:w-[6px]
                                 ${DOT_COLORS[dot]}
                               `}
                             />
@@ -1434,67 +1614,47 @@ export default function CalendarList({
             </div>
           </section>
 
-          {/* ========================================
-              INFORMATION BANNER
-          ======================================== */}
+          {/* RESIDENT BANNER */}
 
           {resident && (
             <div
               className="
-                mt-[6px] flex shrink-0
-                items-center gap-1 rounded-[3px]
-                bg-[#ffe4e9] px-[7px] py-[3px]
-                min-[360px]:mt-2
-                min-[360px]:gap-2
-                min-[360px]:rounded-md
-                min-[360px]:px-3
-                min-[360px]:py-2
+                mt-2 flex shrink-0
+                items-center gap-1.5
+                rounded bg-[#ffe4e9]
+                px-2 py-1.5
               "
             >
               <CircleAlert
-                aria-hidden="true"
+                size={14}
                 className="
-                  h-[11px] w-[11px]
                   shrink-0 text-[#f3264c]
-                  min-[360px]:h-[17px]
-                  min-[360px]:w-[17px]
                 "
               />
 
               <p
                 className="
-                  text-[8px] font-medium
-                  leading-[11px] text-[#171717]
-                  min-[360px]:text-[12px]
-                  min-[360px]:leading-4
+                  text-[11px] leading-4
                 "
               >
-                Schedules are based on the latest waste
-                level reports.
+                Schedules are based on the latest
+                waste level reports.
               </p>
             </div>
           )}
 
-          {/* ========================================
-              COLLECTION SCHEDULE HEADING
-          ======================================== */}
+          {/* SECTION HEADING */}
 
           <div
             className="
               flex shrink-0 items-center
-              justify-between gap-2
-              pb-[5px] pt-[7px]
-              min-[360px]:pb-2
-              min-[360px]:pt-3
+              justify-between gap-2 py-2
             "
           >
             <h2
               className="
-                min-w-0 text-[11px]
-                font-extrabold leading-[14px]
-                text-[#222]
-                min-[360px]:text-[16px]
-                min-[360px]:leading-5
+                text-[12px] font-extrabold
+                sm:text-base
               "
             >
               Collection Schedule
@@ -1502,20 +1662,17 @@ export default function CalendarList({
 
             <span
               className="
-                shrink-0 text-[8px]
-                leading-tight text-[#696969]
-                min-[360px]:text-[12px]
+                text-[10px] text-neutral-600
+                sm:text-xs
               "
             >
               {loading
                 ? "Loading..."
-                : `${visibleItems.length} site(s)`}
+                : `${visible.length} site(s)`}
             </span>
           </div>
 
-          {/* ========================================
-              SCROLLABLE SCHEDULE CARDS
-          ======================================== */}
+          {/* COLLECTION CARDS */}
 
           <div
             role="region"
@@ -1523,97 +1680,101 @@ export default function CalendarList({
             aria-busy={loading}
             tabIndex={0}
             className="
-              min-h-0 flex-1
-              space-y-[8px] overflow-y-auto
+              min-h-0 flex-1 space-y-2
+              overflow-y-auto
               overscroll-contain px-px pb-4
               [scrollbar-width:none]
-              [-ms-overflow-style:none]
               [&::-webkit-scrollbar]:hidden
-              min-[360px]:space-y-3
+              sm:space-y-2.5
             "
           >
-            {/* LOADING */}
-
             {loading ? (
               <p
                 role="status"
                 className="
                   py-8 text-center
-                  text-[11px] text-neutral-600
-                  min-[360px]:text-[14px]
+                  text-xs text-neutral-600
+                  sm:text-sm
                 "
               >
                 Loading schedules...
               </p>
             ) : error ? (
-              /* ERROR */
-
               <div
                 role="alert"
                 className="
-                  rounded-lg border border-red-200
-                  bg-red-50 p-3
-                  text-[11px] leading-relaxed
-                  text-red-700
-                  min-[360px]:text-[14px]
+                  rounded-lg border
+                  border-red-200 bg-red-50
+                  p-3 text-xs text-red-700
+                  sm:text-sm
                 "
               >
-                <p>{error}</p>
+                {error}
 
                 <button
                   type="button"
                   onClick={() => void load()}
                   className="
-                    mt-2 font-bold underline
-                    underline-offset-2
+                    mt-2 block
+                    font-semibold underline
                   "
                 >
                   Try again
                 </button>
               </div>
-            ) : visibleItems.length === 0 ? (
-              /* EMPTY STATE */
-
+            ) : visible.length === 0 ? (
               <p
                 className="
                   rounded-lg border
-                  border-[#ffb9c1]
+                  border-[#f5b4bc]
                   bg-[#fff7f8] p-3
-                  text-center text-[11px]
-                  leading-relaxed text-neutral-600
-                  min-[360px]:text-[14px]
+                  text-center text-xs
+                  text-neutral-600
                 "
               >
                 No schedules available for this period.
               </p>
             ) : (
-              /* ========================================
-                  SCHEDULE CARDS
-              ======================================== */
-
-              visibleItems.map((item) => {
+              visible.map((item) => {
                 const label = resident
                   ? item.type
                   : item.status;
 
-                const color = resident
+                const background = resident
                   ? badgeColor(item.type)
-                  : collectionStatusColor(item.status);
+                  : collectionStatusColor(
+                      item.status
+                    );
 
-                const badgeTextColor =
-                  label === "Priority Collection" ||
-                  label === "Delayed" ||
-                  label === "Cancelled" ||
-                  label === "Collected" ||
-                  label === "In Progress"
-                    ? "text-white"
-                    : "text-[#262626]";
+                const whiteText = [
+                  "Priority Collection",
+                  "Delayed",
+                  "Collected",
+                  "In Progress",
+                  "Cancelled",
+                ].includes(label);
 
-                // ScheduleDetails.tsx navigation
+                // =====================================
+                // STATUS-BASED NAVIGATION
+                // =====================================
+
+                // Collector Pending/In Progress/Delayed:
+                // WasteCollection.tsx
+                //
+                // Collector Collected/Completed:
+                // ScheduleDetails.tsx
+                //
+                // Resident:
+                // ScheduleDetails.tsx
 
                 const detailsPath =
-                  `/${currentRole}/schedule-details/${item.id}`;
+                  !resident &&
+                  item.status !== "Collected" &&
+                  item.status !== "Cancelled"
+                    ? `/collector/waste-collection/${item.id}`
+                    : `/${currentRole}/schedule-details/${item.id}`;
 
+                // Information passed to destination.
                 const site = {
                   id: item.siteId,
                   scheduleId: item.id,
@@ -1629,249 +1790,197 @@ export default function CalendarList({
                 };
 
                 return (
-                  <article
+                  <Link
                     key={item.id}
+                    to={detailsPath}
+                    state={{
+                      scheduleId: item.id,
+                      siteId: item.siteId,
+                      schedule: item,
+                      site,
+                      collection: site,
+                    }}
+                    aria-label={`${item.name}, ${item.status}. View schedule`}
                     className="
-                      relative overflow-hidden
-                      rounded-[9px] border
-                      border-[#f3aab4]
+                      group relative block
+                      overflow-hidden rounded-[10px]
+                      border border-[#f3aab4]
                       bg-[#fff6f7]
-                      shadow-[0_2px_2px_rgba(0,0,0,0.15)]
-                      min-[360px]:rounded-xl
+                      shadow-[0_2px_2px_rgba(0,0,0,0.16)]
+                      focus-visible:outline
+                      focus-visible:outline-2
+                      focus-visible:outline-red-600
                     "
                   >
-                    {/* ========================================
-                        TOP RIGHT STATUS BADGE
-                    ======================================== */}
+                    {/* STATUS BADGE */}
 
                     <span
                       className={`
-                        absolute right-[5px] top-[3px]
+                        absolute right-1.5 top-1
                         max-w-[calc(100%-12px)]
                         truncate rounded-full
-                        px-[5px] py-[1px]
-                        text-[8px] font-semibold
-                        leading-[11px]
-                        min-[360px]:right-2
-                        min-[360px]:top-1.5
-                        min-[360px]:px-2
-                        min-[360px]:py-0.5
-                        min-[360px]:text-[11px]
-                        min-[360px]:leading-[15px]
-                        ${color}
-                        ${badgeTextColor}
+                        px-2 py-0.5 text-[9px]
+                        font-semibold leading-tight
+                        sm:text-[11px]
+                        ${background}
+                        ${
+                          whiteText
+                            ? "text-white"
+                            : "text-[#222]"
+                        }
                       `}
                     >
                       {label}
                     </span>
 
-                    {/* ========================================
-                        CARD BODY
-                    ======================================== */}
+                    {/* CARD BODY */}
 
                     <div
                       className="
                         flex min-w-0 items-start
-                        gap-[6px] px-[5px]
-                        pb-[5px] pt-[18px]
-                        min-[360px]:gap-3
-                        min-[360px]:px-3
-                        min-[360px]:pb-3
-                        min-[360px]:pt-[30px]
+                        gap-2 px-2 pb-1.5 pt-5
+                        sm:gap-2.5 sm:px-3
+                        sm:pb-2 sm:pt-7
                       "
                     >
-                      {/* RED BIN ICON */}
-
-                      <div
+                      <span
+                        aria-hidden="true"
                         className="
-                          grid h-[32px] w-[32px]
-                          shrink-0 place-items-center
-                          rounded-[5px]
-                          bg-[#ffa6b0]
-                          text-[#f51d29]
-                          min-[360px]:h-[48px]
-                          min-[360px]:w-[48px]
-                          min-[360px]:rounded-lg
+                          grid h-9 w-9 shrink-0
+                          place-items-center
+                          rounded-md bg-[#ffa7b1]
+                          text-[#ff1938]
+                          sm:h-12 sm:w-12
                         "
                       >
                         <Trash2
-                          aria-hidden="true"
-                          strokeWidth={2.7}
+                          size={26}
+                          strokeWidth={2.6}
                           className="
-                            h-[24px] w-[24px]
-                            min-[360px]:h-[34px]
-                            min-[360px]:w-[34px]
+                            sm:h-8 sm:w-8
                           "
                         />
-                      </div>
-
-                      {/* SITE INFORMATION */}
+                      </span>
 
                       <div className="min-w-0 flex-1">
-                        {/* SITE NAME */}
-
                         <h3
                           className="
-                            break-words text-[11px]
-                            font-extrabold leading-[13px]
+                            break-words text-[12px]
+                            font-extrabold leading-4
                             text-[#161616]
-                            min-[360px]:text-[15px]
-                            min-[360px]:leading-[19px]
+                            sm:text-[15px]
                           "
                         >
                           {item.name}
                         </h3>
 
-                        {/* ADDRESS */}
-
                         <p
                           className="
-                            mt-[2px] flex min-w-0
-                            items-start gap-[2px]
-                            text-[8px] leading-[11px]
-                            text-[#444]
-                            min-[360px]:mt-1
-                            min-[360px]:gap-1
-                            min-[360px]:text-[12px]
-                            min-[360px]:leading-4
+                            mt-0.5 flex items-start
+                            gap-1 text-[10px]
+                            leading-4 text-neutral-700
+                            sm:text-xs
                           "
                         >
                           <MapPin
-                            aria-hidden="true"
                             className="
-                              mt-px h-[9px] w-[9px]
-                              shrink-0
-                              min-[360px]:h-[14px]
-                              min-[360px]:w-[14px]
+                              mt-0.5 h-3 w-3 shrink-0
                             "
+                            aria-hidden="true"
                           />
 
-                          <span className="min-w-0 break-words">
+                          <span
+                            className="
+                              min-w-0 break-words
+                            "
+                          >
                             {item.address}
                           </span>
                         </p>
 
-                        {/* COLLECTION TIME */}
-
                         <p
                           className="
-                            mt-[2px] flex items-center
-                            gap-[2px] text-[8px]
-                            leading-[11px] text-[#444]
-                            min-[360px]:mt-1
-                            min-[360px]:gap-1
-                            min-[360px]:text-[12px]
-                            min-[360px]:leading-4
+                            mt-0.5 flex items-center
+                            gap-1 text-[10px]
+                            leading-4 text-neutral-700
+                            sm:text-xs
                           "
                         >
                           <Clock3
-                            aria-hidden="true"
                             className="
-                              h-[9px] w-[9px]
-                              shrink-0
-                              min-[360px]:h-[14px]
-                              min-[360px]:w-[14px]
+                              h-3 w-3 shrink-0
                             "
+                            aria-hidden="true"
                           />
 
-                          <span>{item.time}</span>
+                          <span>
+                            {item.time}
+                          </span>
                         </p>
                       </div>
                     </div>
 
-                    {/* ========================================
-                        CARD FOOTER
-                    ======================================== */}
+                    {/* CARD FOOTER */}
 
                     <div
                       className="
                         flex min-h-[20px]
                         items-center justify-between
-                        gap-1 border-t
+                        gap-2 border-t
                         border-[#f8d6db]
-                        px-[6px]
-                        min-[360px]:min-h-[34px]
-                        min-[360px]:gap-2
-                        min-[360px]:px-3
+                        px-2 sm:min-h-[30px]
+                        sm:px-3
                       "
                     >
-                      {/* COLLECTOR NAME */}
-
                       {resident ? (
                         <p
                           className="
                             flex min-w-0 flex-1
-                            items-center gap-[3px]
-                            text-[8px] leading-tight
-                            text-[#363636]
-                            min-[360px]:gap-1.5
-                            min-[360px]:text-[11px]
+                            items-center gap-1
+                            text-[10px]
+                            text-neutral-700
+                            sm:text-xs
                           "
                         >
                           <UserRound
-                            aria-hidden="true"
                             className="
-                              h-[9px] w-[9px]
-                              shrink-0
-                              min-[360px]:h-[14px]
-                              min-[360px]:w-[14px]
+                              h-3 w-3 shrink-0
                             "
+                            aria-hidden="true"
                           />
 
-                          <span className="min-w-0 truncate">
+                          <span
+                            className="
+                              min-w-0 truncate
+                            "
+                          >
                             Collector: {item.collector}
                           </span>
                         </p>
                       ) : (
-                        <span
-                          className="
-                            min-w-0 flex-1
-                            text-[8px] text-[#555]
-                            min-[360px]:text-[11px]
-                          "
-                        >
-                          {item.status}
-                        </span>
+                        <span className="flex-1" />
                       )}
 
-                      {/* ========================================
-                          VIEW DETAILS BUTTON
-                      ======================================== */}
-
-                      <Link
-                        to={detailsPath}
-                        state={{
-                          schedule: item,
-                          site,
-                          collection: site,
-                        }}
+                      <span
                         className="
-                          flex min-h-[20px]
-                          shrink-0 items-center
-                          gap-px whitespace-nowrap
-                          text-[8px] font-medium
-                          leading-tight text-[#b91c2d]
-                          hover:underline
-                          focus-visible:underline
-                          min-[360px]:min-h-[34px]
-                          min-[360px]:gap-1
-                          min-[360px]:text-[12px]
-                          min-[360px]:font-semibold
+                          flex min-h-[24px]
+                          items-center gap-0.5
+                          whitespace-nowrap
+                          text-[10px] font-medium
+                          text-[#b91c2d]
+                          group-hover:underline
+                          sm:min-h-9 sm:text-xs
                         "
                       >
                         View details
 
                         <ChevronRight
+                          size={13}
                           aria-hidden="true"
-                          className="
-                            h-[10px] w-[10px]
-                            min-[360px]:h-[15px]
-                            min-[360px]:w-[15px]
-                          "
                         />
-                      </Link>
+                      </span>
                     </div>
-                  </article>
+                  </Link>
                 );
               })
             )}

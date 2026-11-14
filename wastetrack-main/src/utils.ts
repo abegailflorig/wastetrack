@@ -1,1 +1,0 @@
-export const img=(name:string)=>`/src/assets/${name}`;
