@@ -1,20 +1,51 @@
+
 import { useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router";
-import { MapPin } from "lucide-react";
+import { MapPin, QrCode } from "lucide-react";
 import * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import TopBar from "../../components/TopBar";
+
+// ==========================================
+// TYPES
+// ==========================================
+
+type SelectionMethod = "qr" | "manual";
 
 type SelectedLocation = {
   latitude: number;
   longitude: number;
   address: string;
   description?: string;
+
+  siteId?: string;
+  siteName?: string;
+  qrCode?: string;
+  isRegistered?: boolean;
+
+  selectionMethod?: SelectionMethod;
+  source?: string;
 };
 
-function isSelectedLocation(value: unknown): value is SelectedLocation {
-  if (!value || typeof value !== "object") return false;
+type RouteState = {
+  selectedLocation?: unknown;
+  selectionMethod?: unknown;
+  source?: unknown;
+  qrVerified?: unknown;
+  qrCode?: unknown;
+};
+
+// ==========================================
+// VALIDATE SELECTED LOCATION
+// ==========================================
+
+function isSelectedLocation(
+  value: unknown
+): value is SelectedLocation {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
 
   const point = value as Partial<SelectedLocation>;
 
@@ -23,22 +54,111 @@ function isSelectedLocation(value: unknown): value is SelectedLocation {
     Number.isFinite(point.latitude) &&
     point.latitude >= -90 &&
     point.latitude <= 90 &&
+
     typeof point.longitude === "number" &&
     Number.isFinite(point.longitude) &&
     point.longitude >= -180 &&
     point.longitude <= 180 &&
+
     typeof point.address === "string" &&
+
     (point.description === undefined ||
-      typeof point.description === "string")
+      typeof point.description === "string") &&
+
+    (point.siteId === undefined ||
+      typeof point.siteId === "string") &&
+
+    (point.siteName === undefined ||
+      typeof point.siteName === "string") &&
+
+    (point.qrCode === undefined ||
+      typeof point.qrCode === "string") &&
+
+    (point.isRegistered === undefined ||
+      typeof point.isRegistered === "boolean")
   );
 }
+
+// ==========================================
+// DETECT HOW LOCATION WAS SELECTED
+// ==========================================
+
+function detectSelectionMethod(
+  state: RouteState | null,
+  selectedLocation: SelectedLocation | null
+): SelectionMethod {
+  // Prefer an explicitly supplied method.
+  const declared =
+    state?.selectionMethod ??
+    state?.source ??
+    selectedLocation?.selectionMethod ??
+    selectedLocation?.source;
+
+  // ====================================
+  // MANUALLY PINNED FROM SITEMAP
+  // ====================================
+
+  if (
+    declared === "manual" ||
+    declared === "map"
+  ) {
+    return "manual";
+  }
+
+  // ====================================
+  // SCANNED USING QRSCANNER
+  // ====================================
+
+  if (
+    declared === "qr" ||
+    declared === "qr-scanner"
+  ) {
+    return "qr";
+  }
+
+  // ====================================
+  // SUPPORT EXISTING QR SCANNER STATE
+  // ====================================
+
+  if (state?.qrVerified === true) {
+    return "qr";
+  }
+
+  // Existing QRScanner.tsx navigates with:
+  // {
+  //   selectedLocation,
+  //   qrCode: selectedLocation.qrCode
+  // }
+  //
+  // Detect that format for compatibility.
+
+  if (
+    selectedLocation?.isRegistered === true &&
+    typeof state?.qrCode === "string" &&
+    state.qrCode.trim().length > 0
+  ) {
+    return "qr";
+  }
+
+  // Default for map-selected locations.
+  // A registered location selected on the map
+  // is still considered manually selected.
+  return "manual";
+}
+
+// ==========================================
+// MAIN SITE DETAILS COMPONENT
+// ==========================================
 
 export default function SiteDetails() {
   const location = useLocation();
 
-  const state = location.state as
-    | { selectedLocation?: unknown }
-    | null;
+  // ========================================
+  // READ NAVIGATION STATE
+  // ========================================
+
+  const state =
+    (location.state ?? null) as RouteState | null;
 
   const selectedLocation = isSelectedLocation(
     state?.selectedLocation
@@ -46,13 +166,49 @@ export default function SiteDetails() {
     ? state.selectedLocation
     : null;
 
-  const latitude = selectedLocation?.latitude;
-  const longitude = selectedLocation?.longitude;
+  // ========================================
+  // DETECT SELECTION METHOD
+  // ========================================
 
-  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const selectionMethod = detectSelectionMethod(
+    state,
+    selectedLocation
+  );
+
+  const isQrScanned =
+    selectionMethod === "qr";
+
+  // ========================================
+  // LOCATION DETAILS
+  // ========================================
+
+  const latitude =
+    selectedLocation?.latitude;
+
+  const longitude =
+    selectedLocation?.longitude;
+
+  const qrCode = isQrScanned
+    ? selectedLocation?.qrCode ||
+      (typeof state?.qrCode === "string"
+        ? state.qrCode
+        : "")
+    : "";
+
+  // ========================================
+  // LEAFLET MAP REFERENCE
+  // ========================================
+
+  const mapContainerRef =
+    useRef<HTMLDivElement | null>(null);
+
+  // ========================================
+  // INITIALIZE MAP
+  // ========================================
 
   useEffect(() => {
-    const container = mapContainerRef.current;
+    const container =
+      mapContainerRef.current;
 
     if (
       !container ||
@@ -62,6 +218,10 @@ export default function SiteDetails() {
       return;
     }
 
+    // ====================================
+    // CREATE LEAFLET MAP
+    // ====================================
+
     const map = L.map(container, {
       center: [latitude, longitude],
       zoom: 18,
@@ -69,6 +229,10 @@ export default function SiteDetails() {
       maxZoom: 19,
       scrollWheelZoom: false,
     });
+
+    // ====================================
+    // OPENSTREETMAP TILES
+    // ====================================
 
     L.tileLayer(
       "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -78,6 +242,10 @@ export default function SiteDetails() {
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       }
     ).addTo(map);
+
+    // ====================================
+    // CUSTOM LOCATION PIN
+    // ====================================
 
     const pinIcon = L.divIcon({
       className: "",
@@ -94,17 +262,35 @@ export default function SiteDetails() {
             stroke="white"
             stroke-width="1.5"
           />
-          <circle cx="12" cy="11" r="4" fill="white"/>
+          <circle
+            cx="12"
+            cy="11"
+            r="4"
+            fill="white"
+          />
         </svg>
       `,
       iconSize: [36, 44],
       iconAnchor: [18, 44],
     });
 
-    L.marker([latitude, longitude], {
-      icon: pinIcon,
-      title: "Selected disposal site",
-    }).addTo(map);
+    // ====================================
+    // DISPLAY SELECTED LOCATION PIN
+    // ====================================
+
+    L.marker(
+      [latitude, longitude],
+      {
+        icon: pinIcon,
+        title: isQrScanned
+          ? "QR-scanned disposal site"
+          : "Manually selected location",
+      }
+    ).addTo(map);
+
+    // ====================================
+    // RESPONSIVE MAP
+    // ====================================
 
     const observer = new ResizeObserver(() => {
       map.invalidateSize();
@@ -112,11 +298,29 @@ export default function SiteDetails() {
 
     observer.observe(container);
 
+    const frame =
+      window.requestAnimationFrame(() => {
+        map.invalidateSize();
+      });
+
+    // ====================================
+    // CLEANUP
+    // ====================================
+
     return () => {
+      window.cancelAnimationFrame(frame);
       observer.disconnect();
       map.remove();
     };
-  }, [latitude, longitude]);
+  }, [
+    latitude,
+    longitude,
+    isQrScanned,
+  ]);
+
+  // ========================================
+  // MAIN USER INTERFACE
+  // ========================================
 
   return (
     <main className="h-[calc(100dvh-5rem)] overflow-y-auto overscroll-contain bg-white">
@@ -126,6 +330,11 @@ export default function SiteDetails() {
       />
 
       <div className="mx-auto w-full max-w-6xl px-3 pb-6 sm:px-6 lg:px-8">
+
+        {/* ====================================
+            NO LOCATION SELECTED
+        ==================================== */}
+
         {!selectedLocation ? (
           <section className="mt-6 rounded-2xl border border-neutral-200 p-5 text-center">
             <MapPin
@@ -138,7 +347,9 @@ export default function SiteDetails() {
             </h1>
 
             <p className="mt-2 text-sm text-neutral-600">
-              Select a disposal site on the map to continue.
+              Select a disposal site on the map
+              or scan a registered QR code
+              to continue.
             </p>
 
             <Link
@@ -150,7 +361,11 @@ export default function SiteDetails() {
           </section>
         ) : (
           <>
-            {/* Map centered on the confirmed location */}
+
+            {/* ====================================
+                DISPOSAL SITE MAP
+            ==================================== */}
+
             <div className="relative isolate mt-3 overflow-hidden rounded-2xl border border-neutral-200">
               <div
                 ref={mapContainerRef}
@@ -159,48 +374,114 @@ export default function SiteDetails() {
               />
             </div>
 
-            {/* Site information received from SiteMap */}
+            {/* ====================================
+                SITE INFORMATION CARD
+            ==================================== */}
+
             <section className="mt-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-6">
+
+              {/* ====================================
+                  SITE HEADER
+              ==================================== */}
+
               <div className="flex items-start gap-3">
-                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-red-50 text-[#A61B1B] sm:h-14 sm:w-14">
-                  <MapPin size={27} />
+
+                {/* ICON CHANGES BASED ON SOURCE */}
+
+                <div
+                  className={`grid h-12 w-12 shrink-0 place-items-center rounded-xl sm:h-14 sm:w-14 ${
+                    isQrScanned
+                      ? "bg-green-50 text-green-700"
+                      : "bg-red-50 text-[#A61B1B]"
+                  }`}
+                >
+                  {isQrScanned ? (
+                    <QrCode size={27} />
+                  ) : (
+                    <MapPin size={27} />
+                  )}
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <h1 className="text-base font-bold sm:text-lg">
-                    Selected Disposal Site
+
+                  {/* ====================================
+                      SITE TITLE
+                  ==================================== */}
+
+                  <h1 className="break-words text-base font-bold sm:text-lg">
+                    {isQrScanned &&
+                    selectedLocation.siteName
+                      ? selectedLocation.siteName
+                      : "Selected Disposal Site"}
                   </h1>
+
+                  {/* ADDRESS */}
 
                   <p className="mt-1 break-words text-xs leading-relaxed text-neutral-600 sm:text-sm">
                     {selectedLocation.address ||
                       "Address unavailable"}
                   </p>
 
-                  <span className="mt-2 inline-block rounded-full border border-red-200 bg-red-50 px-3 py-1 text-[10px] font-medium text-[#A61B1B] sm:text-xs">
-                    Manually pinned location
+                  {/* ====================================
+                      AUTOMATIC SELECTION DETECTION
+                  ==================================== */}
+
+                  <span
+                    className={`mt-2 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-medium sm:text-xs ${
+                      isQrScanned
+                        ? "border-green-200 bg-green-50 text-green-700"
+                        : "border-red-200 bg-red-50 text-[#A61B1B]"
+                    }`}
+                  >
+                    {isQrScanned ? (
+                      <>
+                        <QrCode size={13} />
+                        Scanned QR code
+                      </>
+                    ) : (
+                      <>
+                        <MapPin size={13} />
+                        Manually pinned location
+                      </>
+                    )}
                   </span>
                 </div>
               </div>
 
+              {/* ====================================
+                  COORDINATES
+              ==================================== */}
+
               <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+                {/* LATITUDE */}
+
                 <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3">
                   <p className="text-[10px] font-medium uppercase tracking-wide text-neutral-500 sm:text-xs">
                     Latitude
                   </p>
+
                   <p className="mt-1 break-words text-sm font-semibold">
                     {selectedLocation.latitude.toFixed(7)}°
                   </p>
                 </div>
 
+                {/* LONGITUDE */}
+
                 <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3">
                   <p className="text-[10px] font-medium uppercase tracking-wide text-neutral-500 sm:text-xs">
                     Longitude
                   </p>
+
                   <p className="mt-1 break-words text-sm font-semibold">
                     {selectedLocation.longitude.toFixed(7)}°
                   </p>
                 </div>
               </div>
+
+              {/* ====================================
+                  SITE DESCRIPTION
+              ==================================== */}
 
               <div className="mt-4 rounded-xl border border-neutral-200 p-3 sm:p-4">
                 <h2 className="text-xs font-semibold sm:text-sm">
@@ -213,16 +494,37 @@ export default function SiteDetails() {
                 </p>
               </div>
 
+              {/* ====================================
+                  CREATE A REPORT
+              ==================================== */}
+
               <Link
                 to="/resident/report-waste/create"
-                state={{ selectedLocation }}
+                state={{
+                  selectedLocation: {
+                    ...selectedLocation,
+                    selectionMethod,
+                  },
+
+                  selectionMethod,
+
+                  qrVerified: isQrScanned,
+
+                  ...(isQrScanned && qrCode
+                    ? { qrCode }
+                    : {}),
+                }}
                 className="mt-5 flex min-h-11 items-center justify-center rounded-xl border border-red-300 bg-[#fff1e6] px-4 py-3 text-sm font-bold text-[#A61B1B] transition-colors hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
               >
                 CREATE A REPORT
               </Link>
 
+              {/* ====================================
+                  CHANGE LOCATION
+              ==================================== */}
+
               <Link
-                to="/resident/report-waste/map"
+                to="/resident/report-waste"
                 className="mt-3 flex min-h-11 items-center justify-center rounded-xl px-4 text-xs font-medium text-neutral-600 hover:bg-neutral-100 sm:text-sm"
               >
                 Change Location

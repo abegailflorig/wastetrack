@@ -7,6 +7,8 @@ import {
   useState,
 } from "react";
 import { useNavigate } from "react-router";
+import { QRCodeSVG } from "qrcode.react";
+import { Download, QrCode } from "lucide-react";
 import * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { supabase } from "../../lib/supabase";
@@ -21,6 +23,7 @@ type Site = {
   location: string | null;
   latitude: number | null;
   longitude: number | null;
+  qr_code: string | null;
   is_registered: boolean;
   is_active: boolean;
 };
@@ -32,8 +35,8 @@ type SiteState =
 
 const PAGE_SIZE = 500;
 
-// Initial map center only. Actual map pins
-// come from Supabase, not hardcoded positions.
+// Initial map center only.
+// Actual map pins come from Supabase.
 const INITIAL_MAP_CENTER: L.LatLngExpression = [
   8.2421,
   124.245,
@@ -411,6 +414,112 @@ const css = `
 }
 
 /* ================================= */
+/* SELECTED REGISTERED SITE QR CARD */
+/* ================================= */
+
+.ds-qr-card {
+  margin: 14px 0;
+  padding: 15px 12px;
+  background: #fff;
+  border: 1px solid #d9cfbd;
+  border-radius: 10px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.04);
+}
+
+.ds-qr-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #a81b1e;
+}
+
+.ds-qr-name {
+  margin: 10px 0 4px;
+  color: #222;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.ds-qr-address {
+  margin: 0 0 10px;
+  color: #666;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.ds-qr-preview {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 10px;
+  margin: 10px auto;
+  border: 1px solid #ededed;
+  border-radius: 8px;
+  width: fit-content;
+  max-width: 100%;
+  background: #fff;
+}
+
+.ds-qr-preview svg {
+  display: block;
+  width: min(200px, 60vw);
+  height: auto;
+}
+
+.ds-qr-description {
+  color: #666;
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 8px 0 12px;
+}
+
+.ds-download-qr {
+  width: 100%;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 12px;
+  border: none;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  background: #a81b1e;
+  color: #fff;
+  cursor: pointer;
+}
+
+.ds-download-qr:hover {
+  background: #8f1619;
+}
+
+.ds-download-qr:focus-visible {
+  outline: 2px solid #1b1b1b;
+  outline-offset: 3px;
+}
+
+.ds-qr-warning {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: #855b00;
+  line-height: 1.5;
+}
+
+.ds-qr-error {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #a81b1e;
+}
+
+/* ================================= */
 /* REGISTER BUTTON */
 /* ================================= */
 
@@ -556,6 +665,15 @@ export default function DisposalSites() {
   const [error, setError] =
     useState("");
 
+  const [qrError, setQrError] =
+    useState("");
+
+  const qrSvgRef =
+    useRef<SVGSVGElement | null>(null);
+
+  const selectedListItemRef =
+    useRef<HTMLLIElement | null>(null);
+
   // LEAFLET REFERENCES
   const mapElementRef =
     useRef<HTMLDivElement | null>(null);
@@ -643,6 +761,7 @@ export default function DisposalSites() {
               location,
               latitude,
               longitude,
+              qr_code,
               is_registered,
               is_active
             `)
@@ -854,6 +973,7 @@ export default function DisposalSites() {
 
       // SELECT SITE WHEN PIN IS CLICKED
       marker.on("click", () => {
+        setQrError("");
         setSelectedId(site.site_id);
       });
 
@@ -1026,13 +1146,115 @@ export default function DisposalSites() {
   );
 
   // ========================================
+  // SELECTED SITE AND QR DATA
+  // ========================================
+
+  const selectedSite = useMemo(
+    () =>
+      sites.find(
+        (site) => site.site_id === selectedId
+      ) ?? null,
+    [sites, selectedId]
+  );
+
+  const qrValue = selectedSite
+    ? selectedSite.qr_code?.trim() ||
+      selectedSite.site_id
+    : "";
+
+  const canDownloadQR = Boolean(
+    selectedSite?.is_registered &&
+    selectedSite.is_active
+  );
+
+  // Download the visible SVG.
+  // The payload matches the resident QR scanner.
+  function downloadSelectedQR() {
+    setQrError("");
+
+    if (
+      !canDownloadQR ||
+      !selectedSite ||
+      !qrSvgRef.current
+    ) {
+      return;
+    }
+
+    try {
+      const svg = qrSvgRef.current.cloneNode(
+        true
+      ) as SVGSVGElement;
+
+      svg.setAttribute(
+        "xmlns",
+        "http://www.w3.org/2000/svg"
+      );
+
+      svg.setAttribute("width", "500");
+      svg.setAttribute("height", "500");
+
+      const xml =
+        new XMLSerializer().serializeToString(svg);
+
+      const blob = new Blob([xml], {
+        type: "image/svg+xml;charset=utf-8",
+      });
+
+      const objectUrl =
+        URL.createObjectURL(blob);
+
+      const anchor =
+        document.createElement("a");
+
+      const safeName = selectedSite.site_name
+        .trim()
+        .replace(/[^a-z0-9_-]+/gi, "-")
+        .replace(/^-+|-+$/g, "") ||
+        "disposal-site";
+
+      anchor.href = objectUrl;
+
+      anchor.download =
+        `WasteTrack-${safeName}-` +
+        `${selectedSite.site_id.slice(0, 8)}-QR.svg`;
+
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+
+      window.setTimeout(
+        () => URL.revokeObjectURL(objectUrl),
+        1000
+      );
+    } catch (cause) {
+      console.error(
+        "[WasteTrack] QR download:",
+        cause
+      );
+
+      setQrError(
+        "Unable to download the QR code. Please try again."
+      );
+    }
+  }
+
+  useEffect(() => {
+    // Bring the selected QR card into view.
+    if (selectedId) {
+      selectedListItemRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  }, [selectedId]);
+
+  // ========================================
   // SELECT SITE FROM THE LIST
   // ========================================
 
   function selectSite(site: Site) {
-    setSelectedId(
-      site.site_id
-    );
+    setQrError("");
+    setSelectedId(site.site_id);
 
     if (
       !hasValidCoordinates(site) ||
@@ -1068,7 +1290,10 @@ export default function DisposalSites() {
     <div className="ds-root">
       <style>{css}</style>
 
-      {/* HEADER */}
+      {/* ====================================
+          HEADER
+      ==================================== */}
+
       <header className="ds-head">
         <div>
           <h1 className="ds-title">
@@ -1076,14 +1301,14 @@ export default function DisposalSites() {
           </h1>
 
           <p className="ds-sub">
-            {loading &&
-            sites.length === 0
+            {loading && sites.length === 0
               ? "Loading disposal sites..."
               : `${registeredCount} registered · ${pendingCount} pending review`}
           </p>
         </div>
 
         {/* ADMIN AVATAR */}
+
         <button
           type="button"
           className="ds-avatar"
@@ -1097,7 +1322,10 @@ export default function DisposalSites() {
         </button>
       </header>
 
-      {/* ERROR MESSAGE */}
+      {/* ====================================
+          ERROR MESSAGE
+      ==================================== */}
+
       {error && (
         <div
           className="ds-alert"
@@ -1119,12 +1347,14 @@ export default function DisposalSites() {
         </div>
       )}
 
-      {/* MAIN BODY */}
-      <div className="ds-body">
+      {/* ====================================
+          MAIN BODY
+      ==================================== */}
 
-        {/* ================================= */}
-        {/* LIVE MAP */}
-        {/* ================================= */}
+      <div className="ds-body">
+        {/* ====================================
+            LIVE MAP
+        ==================================== */}
 
         <div className="ds-map-wrap">
           <div
@@ -1144,6 +1374,7 @@ export default function DisposalSites() {
             )}
 
           {/* MAP LEGEND */}
+
           <div
             className="ds-map-legend"
             aria-label="Map pin colors"
@@ -1190,9 +1421,9 @@ export default function DisposalSites() {
           </div>
         </div>
 
-        {/* ================================= */}
-        {/* SUPABASE SITE LIST */}
-        {/* ================================= */}
+        {/* ====================================
+            SUPABASE SITE LIST
+        ==================================== */}
 
         <aside className="ds-panel">
           <h2 className="ds-panel-title">
@@ -1205,7 +1436,16 @@ export default function DisposalSites() {
                 siteState(site);
 
               return (
-                <li key={site.site_id}>
+                <li
+                  key={site.site_id}
+                  ref={
+                    selectedId === site.site_id
+                      ? selectedListItemRef
+                      : null
+                  }
+                >
+                  {/* SELECT LOCATION */}
+
                   <button
                     type="button"
                     className={`ds-site-btn${
@@ -1247,12 +1487,101 @@ export default function DisposalSites() {
                       </span>
                     </span>
                   </button>
+
+                  {/* ====================================
+                      SELECTED SITE QR CODE
+                  ==================================== */}
+
+                  {selectedId === site.site_id &&
+                    selectedSite && (
+                      <section
+                        className="ds-qr-card"
+                        aria-label="Selected site QR code"
+                      >
+                        <h3 className="ds-qr-heading">
+                          <QrCode
+                            size={19}
+                            aria-hidden="true"
+                          />
+                          Site QR Code
+                        </h3>
+
+                        <p className="ds-qr-name">
+                          {selectedSite.site_name}
+                        </p>
+
+                        <p className="ds-qr-address">
+                          {selectedSite.location ||
+                            "Location not specified"}
+                        </p>
+
+                        {canDownloadQR ? (
+                          <>
+                            {/* QR PREVIEW */}
+
+                            <div className="ds-qr-preview">
+                              <QRCodeSVG
+                                ref={qrSvgRef}
+                                value={qrValue}
+                                size={200}
+                                marginSize={4}
+                                level="H"
+                                bgColor="#FFFFFF"
+                                fgColor="#000000"
+                                title={`WasteTrack QR code for ${selectedSite.site_name}`}
+                              />
+                            </div>
+
+                            <p className="ds-qr-description">
+                              Download and print this
+                              code for residents to
+                              scan using the WasteTrack
+                              QR Scanner.
+                            </p>
+
+                            {/* DOWNLOAD BUTTON */}
+
+                            <button
+                              type="button"
+                              className="ds-download-qr"
+                              onClick={
+                                downloadSelectedQR
+                              }
+                            >
+                              <Download
+                                size={17}
+                                aria-hidden="true"
+                              />
+                              Download QR Code
+                            </button>
+                          </>
+                        ) : (
+                          <p className="ds-qr-warning">
+                            QR downloads are available
+                            only for active, registered
+                            disposal sites.
+                          </p>
+                        )}
+
+                        {qrError && (
+                          <p
+                            className="ds-qr-error"
+                            role="alert"
+                          >
+                            {qrError}
+                          </p>
+                        )}
+                      </section>
+                    )}
                 </li>
               );
             })}
           </ul>
 
-          {/* LOADING STATE */}
+          {/* ====================================
+              LOADING STATE
+          ==================================== */}
+
           {loading &&
             sites.length === 0 && (
               <p
@@ -1263,17 +1592,22 @@ export default function DisposalSites() {
               </p>
             )}
 
-          {/* EMPTY STATE */}
+          {/* ====================================
+              EMPTY STATE
+          ==================================== */}
+
           {!loading &&
             sites.length === 0 &&
             !error && (
               <p className="ds-empty">
-                No disposal sites found in
-                Supabase.
+                No disposal sites found in Supabase.
               </p>
             )}
 
-          {/* REGISTER SITE */}
+          {/* ====================================
+              REGISTER SITE
+          ==================================== */}
+
           <button
             type="button"
             className="ds-register"

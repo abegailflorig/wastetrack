@@ -77,7 +77,6 @@ function normalizeStoragePath(
   let path = value.trim();
 
   // Handle complete Supabase Storage URLs.
-
   if (/^https?:\/\//i.test(path)) {
     try {
       const url = new URL(path);
@@ -102,28 +101,18 @@ function normalizeStoragePath(
     }
   }
 
-  // Remove leading slashes.
-
   path = path.replace(/^\/+/, "");
-
-  // Remove Storage API prefix.
 
   path = path.replace(
     /^storage\/v1\/object\/(?:public|sign|authenticated)\/waste-images\//i,
     ""
   );
 
-  // Remove duplicate bucket prefixes.
-
   while (
-    path.toLowerCase().startsWith(
-      `${STORAGE_BUCKET}/`
-    )
+    path.toLowerCase().startsWith(`${STORAGE_BUCKET}/`)
   ) {
     path = path.slice(STORAGE_BUCKET.length + 1);
   }
-
-  // Remove query parameters.
 
   path = path.split("?")[0];
 
@@ -152,7 +141,6 @@ async function getReportPhoto(
       "[WasteTrack] Invalid image storage path:",
       record.storage_path
     );
-
     return null;
   }
 
@@ -172,7 +160,6 @@ async function getReportPhoto(
         error: error.message,
       }
     );
-
     return null;
   }
 
@@ -273,7 +260,6 @@ function statusStyle(status: string): string {
 
 // ========================================
 // REPORT PHOTO COMPONENT
-// ROUNDED CORNERS + FULL IMAGE DISPLAY
 // ========================================
 
 function ReportPhoto({
@@ -287,14 +273,8 @@ function ReportPhoto({
     setFailed(false);
   }, [report.image]);
 
-  // Consistent photo dimensions on all cards.
-
   const sizeClass =
     "h-[76px] w-[66px] shrink-0 sm:h-[96px] sm:w-[86px]";
-
-  // ========================================
-  // IMAGE UNAVAILABLE
-  // ========================================
 
   if (!report.image || failed) {
     return (
@@ -304,10 +284,8 @@ function ReportPhoto({
         className={`
           ${sizeClass}
           grid place-items-center
-          overflow-hidden
-          rounded-[16px]
-          bg-neutral-200
-          text-neutral-500
+          overflow-hidden rounded-[16px]
+          bg-neutral-200 text-neutral-500
         `}
       >
         <ImageOff size={23} />
@@ -315,16 +293,11 @@ function ReportPhoto({
     );
   }
 
-  // ========================================
-  // DISPLAY IMAGE WITH ROUNDED CORNERS
-  // ========================================
-
   return (
     <div
       className={`
         ${sizeClass}
-        overflow-hidden
-        rounded-[16px]
+        overflow-hidden rounded-[16px]
         bg-neutral-100
       `}
     >
@@ -335,8 +308,7 @@ function ReportPhoto({
         onError={() => setFailed(true)}
         className="
           block h-full w-full
-          rounded-[16px]
-          object-contain
+          rounded-[16px] object-contain
         "
       />
     </div>
@@ -457,6 +429,120 @@ export default function ResidentDashboard() {
   }, []);
 
   // ========================================
+  // UNREAD REJECTED NOTIFICATION COUNT
+  // ========================================
+
+  useEffect(() => {
+    if (!authReady) return;
+
+    let active = true;
+    let requestNumber = 0;
+
+    // Reset when a resident changes account.
+    setUnreadCount(0);
+
+    if (!userId) return;
+
+    async function refreshUnreadRejectedCount() {
+      const currentRequest = ++requestNumber;
+
+      // Count only unread rejected notifications.
+      // The rejected-only database trigger
+      // may use notification_type = "system",
+      // so the title is checked as well.
+
+      const {
+        count,
+        error: countError,
+      } = await supabase
+        .from("notifications")
+        .select("notification_id", {
+          count: "exact",
+          head: true,
+        })
+        .eq("user_id", userId)
+        .eq("is_read", false)
+        .or(
+          "title.ilike.%reject%,title.ilike.%declin%,notification_type.ilike.%reject%,notification_type.ilike.%declin%"
+        );
+
+      if (
+        !active ||
+        currentRequest !== requestNumber
+      ) {
+        return;
+      }
+
+      if (countError) {
+        console.error(
+          "[WasteTrack] Unread rejected notification count:",
+          countError.message
+        );
+        return;
+      }
+
+      setUnreadCount(count ?? 0);
+    }
+
+    // Initial count
+    void refreshUnreadRejectedCount();
+
+    // ====================================
+    // REALTIME NOTIFICATION UPDATES
+    // ====================================
+
+    const notificationChannel = supabase
+      .channel(`resident-rejected-badge-${userId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          void refreshUnreadRejectedCount();
+        }
+      )
+      .subscribe();
+
+    // ====================================
+    // REFRESH WHEN RETURNING TO DASHBOARD
+    // ====================================
+
+    const onFocus = () => {
+      void refreshUnreadRejectedCount();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshUnreadRejectedCount();
+      }
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener(
+      "visibilitychange",
+      onVisibilityChange
+    );
+
+    return () => {
+      active = false;
+      requestNumber += 1;
+
+      window.removeEventListener("focus", onFocus);
+
+      document.removeEventListener(
+        "visibilitychange",
+        onVisibilityChange
+      );
+
+      void supabase.removeChannel(notificationChannel);
+    };
+  }, [authReady, userId]);
+
+  // ========================================
   // LOAD DASHBOARD FROM SUPABASE
   // ========================================
 
@@ -467,7 +553,6 @@ export default function ResidentDashboard() {
 
     setReports([]);
     setUserName("Resident");
-    setUnreadCount(0);
     setError("");
     setNotice("");
 
@@ -481,13 +566,12 @@ export default function ResidentDashboard() {
     async function loadDashboard() {
       try {
         // ====================================
-        // FETCH USER, REPORTS, NOTIFICATIONS
+        // FETCH USER PROFILE AND REPORTS
         // ====================================
 
         const [
           profileResult,
           reportsResult,
-          notificationsResult,
         ] = await Promise.all([
           supabase
             .from("users")
@@ -510,15 +594,6 @@ export default function ResidentDashboard() {
               ascending: false,
             })
             .limit(20),
-
-          supabase
-            .from("notifications")
-            .select("notification_id", {
-              count: "exact",
-              head: true,
-            })
-            .eq("user_id", userId)
-            .eq("is_read", false),
         ]);
 
         if (!active) return;
@@ -545,21 +620,6 @@ export default function ResidentDashboard() {
           if (name) {
             setUserName(name);
           }
-        }
-
-        // ====================================
-        // UNREAD NOTIFICATION COUNT
-        // ====================================
-
-        if (notificationsResult.error) {
-          console.error(
-            "[WasteTrack] Notification count:",
-            notificationsResult.error.message
-          );
-        } else {
-          setUnreadCount(
-            notificationsResult.count ?? 0
-          );
         }
 
         // ====================================
@@ -601,7 +661,7 @@ export default function ResidentDashboard() {
         ];
 
         // ====================================
-        // FETCH DISPOSAL SITE DETAILS
+        // FETCH DISPOSAL SITES
         // ====================================
 
         const sitesRequest =
@@ -627,8 +687,6 @@ export default function ResidentDashboard() {
           statusesResult,
         ] = await Promise.all([
           sitesRequest,
-
-          // Correct schema: no "src" column.
 
           supabase
             .from("waste_images")
@@ -659,7 +717,7 @@ export default function ResidentDashboard() {
         if (!active) return;
 
         // ====================================
-        // HANDLE ERRORS
+        // HANDLE RELATED DATA ERRORS
         // ====================================
 
         if (sitesResult.error) {
@@ -699,8 +757,7 @@ export default function ResidentDashboard() {
         // MAP DISPOSAL SITE RECORDS
         // ====================================
 
-        const siteMap =
-          new Map<string, SiteRow>();
+        const siteMap = new Map<string, SiteRow>();
 
         for (
           const site of
@@ -748,7 +805,7 @@ export default function ResidentDashboard() {
         }
 
         // ====================================
-        // LOAD REPORT PHOTOS
+        // LOAD REPORT PHOTOS AND DETAILS
         // ====================================
 
         const mappedReports =
@@ -762,13 +819,10 @@ export default function ResidentDashboard() {
                 const imageRecord =
                   imageMap.get(row.report_id);
 
-                // Read actual waste report photo.
-
                 let image =
                   await getReportPhoto(imageRecord);
 
                 // Fallback to disposal site image.
-
                 if (
                   !image &&
                   site?.site_image &&
@@ -845,21 +899,6 @@ export default function ResidentDashboard() {
   ]);
 
   // ========================================
-  // DATE AND GREETING
-  // ========================================
-
-  const today = new Date();
-
-  const dateLabel = today
-    .toLocaleDateString("en-US", {
-      timeZone: "Asia/Manila",
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-    })
-    .toUpperCase();
-
-  // ========================================
   // MAIN DASHBOARD UI
   // ========================================
 
@@ -927,9 +966,7 @@ export default function ResidentDashboard() {
                 yChannelSelector="G"
               />
 
-              <feGaussianBlur
-                stdDeviation="1.2"
-              />
+              <feGaussianBlur stdDeviation="1.2" />
             </filter>
 
             <pattern
@@ -984,7 +1021,7 @@ export default function ResidentDashboard() {
 
         <div className="mx-auto w-full max-w-6xl">
           {/* ====================================
-              GREETING + NOTIFICATION BELL
+              GREETING AND NOTIFICATION BELL
           ==================================== */}
 
           <div
@@ -1040,15 +1077,15 @@ export default function ResidentDashboard() {
             </div>
 
             {/* ====================================
-                NOTIFICATION ICON
+                NOTIFICATION BELL WITH NUMBER
             ==================================== */}
 
             <Link
               to="/resident/notifications"
               aria-label={
                 unreadCount > 0
-                  ? `Notifications, ${unreadCount} unread`
-                  : "Notifications"
+                  ? `${unreadCount} unread rejected report notifications`
+                  : "Notifications, no unread rejected reports"
               }
               className="
                 relative inline-flex
@@ -1069,12 +1106,14 @@ export default function ResidentDashboard() {
                 "
               />
 
+              {/* DISPLAY BADGE ONLY WHEN COUNT > 0 */}
+
               {unreadCount > 0 && (
                 <span
                   aria-hidden="true"
                   className="
-                    absolute right-0 top-0
-                    grid min-h-4 min-w-4
+                    absolute -right-0.5 -top-0.5
+                    grid min-h-[18px] min-w-[18px]
                     place-items-center
                     rounded-full
                     border border-white
@@ -1178,24 +1217,21 @@ export default function ResidentDashboard() {
               >
                 <span
                   className="
-                    h-2 w-2
-                    rounded-full
+                    h-2 w-2 rounded-full
                     bg-white
                   "
                 />
 
                 <span
                   className="
-                    h-2 w-2
-                    rounded-full
+                    h-2 w-2 rounded-full
                     bg-white/65
                   "
                 />
 
                 <span
                   className="
-                    h-2 w-2
-                    rounded-full
+                    h-2 w-2 rounded-full
                     bg-white/65
                   "
                 />
@@ -1271,9 +1307,10 @@ export default function ResidentDashboard() {
               Loading your dashboard...
             </p>
           ) : !userId ? (
-            /* ====================================
-                SIGN IN
-            ==================================== */
+
+            // ====================================
+            // SIGN IN
+            // ====================================
 
             <div
               className="
@@ -1311,9 +1348,10 @@ export default function ResidentDashboard() {
               </Link>
             </div>
           ) : error ? (
-            /* ====================================
-                ERROR
-            ==================================== */
+
+            // ====================================
+            // ERROR STATE
+            // ====================================
 
             <div
               role="alert"
@@ -1344,7 +1382,9 @@ export default function ResidentDashboard() {
               <button
                 type="button"
                 onClick={() =>
-                  setRefreshKey((value) => value + 1)
+                  setRefreshKey(
+                    (value) => value + 1
+                  )
                 }
                 className="
                   mt-3 min-h-10
@@ -1358,7 +1398,7 @@ export default function ResidentDashboard() {
           ) : (
             <>
               {/* ====================================
-                  WARNINGS
+                  WARNING NOTICES
               ==================================== */}
 
               {notice && (
@@ -1416,9 +1456,10 @@ export default function ResidentDashboard() {
                   </Link>
                 </div>
               ) : (
-                /* ====================================
-                    REPORT CARDS
-                ==================================== */
+
+                // ====================================
+                // REPORT CARDS
+                // ====================================
 
                 <div
                   className="
@@ -1456,9 +1497,7 @@ export default function ResidentDashboard() {
                           ROUNDED REPORT PHOTO
                       ==================================== */}
 
-                      <ReportPhoto
-                        report={report}
-                      />
+                      <ReportPhoto report={report} />
 
                       {/* ====================================
                           REPORT INFORMATION
@@ -1500,7 +1539,7 @@ export default function ResidentDashboard() {
                           </span>
                         </p>
 
-                        {/* WASTE LEVEL + STATUS */}
+                        {/* WASTE LEVEL AND STATUS */}
 
                         <div
                           className="

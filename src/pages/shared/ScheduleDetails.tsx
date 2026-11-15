@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
@@ -32,12 +33,13 @@ type RecentReportRow = {
   report_id: string;
   date_uploaded: string;
   cnn_detection_level: Schedule["level"];
-  waste_images: {
-    src: string | null;
-    storage_bucket: string;
-    storage_path: string | null;
-    created_at: string;
-  }[];
+};
+
+type WasteImageRow = {
+  report_id: string;
+  storage_bucket: string;
+  storage_path: string | null;
+  created_at: string;
 };
 
 type RecentReport = {
@@ -59,7 +61,9 @@ type CollectionRow = {
 function formatTimestamp(value: string) {
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) return "Unavailable";
+  if (Number.isNaN(date.getTime())) {
+    return "Unavailable";
+  }
 
   return date.toLocaleString("en-US", {
     timeZone: "Asia/Manila",
@@ -71,21 +75,45 @@ function formatTimestamp(value: string) {
   });
 }
 
+// ========================================
+// RESOLVE SUPABASE STORAGE PHOTO
+// ========================================
+
 async function resolveImage(
   bucket: string,
   path: string | null,
   fallback = ""
 ): Promise<string> {
-  if (!path) return fallback;
+  const value = path?.trim();
+
+  if (!value) {
+    return fallback;
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    return value;
+  }
+
+  let storagePath = value.replace(/^\/+/, "");
+
+  if (storagePath.startsWith(`${bucket}/`)) {
+    storagePath = storagePath.slice(bucket.length + 1);
+  }
 
   const { data, error } = await supabase.storage
-    .from(bucket)
-    .createSignedUrl(path, 3600);
+    .from(bucket || "waste-images")
+    .createSignedUrl(storagePath, 3600);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw new Error(error.message);
+  }
 
   return data.signedUrl;
 }
+
+// ========================================
+// SCHEDULE DETAILS COMPONENT
+// ========================================
 
 export default function ScheduleDetails({ role }: Props) {
   const { scheduleId } = useParams();
@@ -100,8 +128,10 @@ export default function ScheduleDetails({ role }: Props) {
   const resident = currentRole === "resident";
 
   const [item, setItem] = useState<Schedule | null>(null);
+
   const [recentReports, setRecentReports] =
     useState<RecentReport[]>([]);
+
   const [collection, setCollection] =
     useState<CollectionRow | null>(null);
 
@@ -111,7 +141,12 @@ export default function ScheduleDetails({ role }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // ========================================
+  // AUTHENTICATION STATE
+  // ========================================
 
   useEffect(() => {
     const {
@@ -125,6 +160,10 @@ export default function ScheduleDetails({ role }: Props) {
     return () => subscription.unsubscribe();
   }, []);
 
+  // ========================================
+  // LOAD SCHEDULE DETAILS
+  // ========================================
+
   useEffect(() => {
     let active = true;
 
@@ -132,13 +171,19 @@ export default function ScheduleDetails({ role }: Props) {
       setLoading(true);
       setError("");
       setNotice("");
+
       setItem(null);
       setRecentReports([]);
       setCollection(null);
+
       setBeforeImage("");
       setAfterImage("");
 
       try {
+        // ====================================
+        // VALIDATE SCHEDULE ID
+        // ====================================
+
         if (
           !scheduleId ||
           !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -150,12 +195,28 @@ export default function ScheduleDetails({ role }: Props) {
           );
         }
 
-        const { data: authData, error: authError } =
-          await supabase.auth.getUser();
+        // ====================================
+        // AUTHENTICATED USER
+        // ====================================
+
+        const {
+          data: authData,
+          error: authError,
+        } = await supabase.auth.getUser();
 
         if (!active) return;
-        if (!authData.user) throw new Error("Please sign in.");
-        if (authError) throw authError;
+
+        if (authError) {
+          throw authError;
+        }
+
+        if (!authData.user) {
+          throw new Error("Please sign in.");
+        }
+
+        // ====================================
+        // LOAD SCHEDULE FROM CALENDARLIST
+        // ====================================
 
         const schedule = await getScheduleById(
           scheduleId,
@@ -175,67 +236,171 @@ export default function ScheduleDetails({ role }: Props) {
 
         const warnings: string[] = [];
 
+        // ====================================
+        // RESIDENT RECENT REPORTS
+        // ====================================
+
         if (resident) {
-          const { data, error: reportsError } = await supabase
+          // STEP 1: Load the latest three waste reports.
+          //
+          // IMPORTANT:
+          // public.waste_images has NO src column.
+
+          const {
+            data: reportRows,
+            error: reportsError,
+          } = await supabase
             .from("waste_reports")
-            .select(`
-              report_id,
-              date_uploaded,
-              cnn_detection_level,
-              waste_images (
-                src,
-                storage_bucket,
-                storage_path,
-                created_at
-              )
-            `)
+            .select(
+              "report_id,date_uploaded,cnn_detection_level"
+            )
             .eq("site_id", schedule.siteId)
-            .order("date_uploaded", { ascending: false })
-            .order("report_id")
+            .order("date_uploaded", {
+              ascending: false,
+            })
+            .order("report_id", {
+              ascending: true,
+            })
             .limit(3);
 
           if (!active) return;
 
           if (reportsError) {
-            warnings.push("Recent reports could not load.");
+            console.error(
+              "[WasteTrack] Recent reports:",
+              reportsError
+            );
+
+            warnings.push(
+              `Recent reports could not load: ${reportsError.message}`
+            );
           } else {
-            const reports = await Promise.all(
-              ((data ?? []) as unknown as RecentReportRow[]).map(
-                async (report): Promise<RecentReport> => {
-                  const latestImage = [
-                    ...(report.waste_images ?? []),
-                  ].sort((a, b) =>
-                    b.created_at.localeCompare(a.created_at)
-                  )[0];
+            const reports =
+              (reportRows ?? []) as RecentReportRow[];
 
-                  let image = latestImage?.src || "";
+            const imageByReport =
+              new Map<string, WasteImageRow>();
 
-                  try {
-                    image = await resolveImage(
-                      latestImage?.storage_bucket || "waste-images",
-                      latestImage?.storage_path ?? null,
-                      image
-                    );
-                  } catch {
-                    warnings.push(
-                      "Some report photos could not load."
-                    );
+            // ====================================
+            // STEP 2: LOAD IMAGE RECORDS
+            // ====================================
+
+            if (reports.length > 0) {
+              const {
+                data: imageRows,
+                error: imagesError,
+              } = await supabase
+                .from("waste_images")
+                .select(
+                  "report_id,storage_bucket,storage_path,created_at"
+                )
+                .in(
+                  "report_id",
+                  reports.map(
+                    (report) => report.report_id
+                  )
+                )
+                .order("created_at", {
+                  ascending: false,
+                });
+
+              if (!active) return;
+
+              if (imagesError) {
+                console.error(
+                  "[WasteTrack] Recent report images:",
+                  imagesError
+                );
+
+                warnings.push(
+                  "Some report photos could not load."
+                );
+              } else {
+                // Keep the newest image per report.
+                for (const row of
+                  (imageRows ?? []) as WasteImageRow[]) {
+                  if (!imageByReport.has(row.report_id)) {
+                    imageByReport.set(row.report_id, row);
                   }
+                }
+              }
+            }
+
+            // ====================================
+            // STEP 3: GET SIGNED IMAGE URLS
+            // ====================================
+
+            const results = await Promise.allSettled(
+              reports.map(
+                async (report): Promise<RecentReport> => {
+                  const photo = imageByReport.get(
+                    report.report_id
+                  );
+
+                  const image = photo?.storage_path
+                    ? await resolveImage(
+                        photo.storage_bucket ||
+                          "waste-images",
+                        photo.storage_path
+                      )
+                    : "";
 
                   return {
                     id: report.report_id,
                     image,
-                    date: formatTimestamp(report.date_uploaded),
+                    date: formatTimestamp(
+                      report.date_uploaded
+                    ),
                     level: report.cnn_detection_level,
                   };
                 }
               )
             );
 
-            if (active) setRecentReports(reports);
+            if (!active) return;
+
+            // ====================================
+            // KEEP REPORTS IF PHOTOS FAIL
+            // ====================================
+
+            const recent = results.map(
+              (result, index): RecentReport => {
+                if (result.status === "fulfilled") {
+                  return result.value;
+                }
+
+                console.warn(
+                  "[WasteTrack] Report photo URL error:",
+                  result.reason
+                );
+
+                warnings.push(
+                  "Some report photos could not load."
+                );
+
+                return {
+                  id: reports[index].report_id,
+                  image: "",
+                  date: formatTimestamp(
+                    reports[index].date_uploaded
+                  ),
+                  level:
+                    reports[index].cnn_detection_level,
+                };
+              }
+            );
+
+            setRecentReports(recent);
           }
         } else {
-          const { data, error: collectionError } = await supabase
+          // ====================================
+          // COLLECTOR COLLECTION RECORD
+          // ====================================
+
+          const {
+            data,
+            error: collectionError,
+          } = await supabase
             .from("collections")
             .select(`
               collection_status,
@@ -252,9 +417,12 @@ export default function ScheduleDetails({ role }: Props) {
           if (!active) return;
 
           if (collectionError) {
-            warnings.push("Collection update could not load.");
+            warnings.push(
+              "Collection update could not load."
+            );
           } else if (data) {
             const record = data as CollectionRow;
+
             setCollection(record);
 
             const resolved = await Promise.allSettled([
@@ -274,19 +442,25 @@ export default function ScheduleDetails({ role }: Props) {
             if (resolved[0].status === "fulfilled") {
               setBeforeImage(resolved[0].value);
             } else {
-              warnings.push("Before-collection photo could not load.");
+              warnings.push(
+                "Before-collection photo could not load."
+              );
             }
 
             if (resolved[1].status === "fulfilled") {
               setAfterImage(resolved[1].value);
             } else {
-              warnings.push("After-collection photo could not load.");
+              warnings.push(
+                "After-collection photo could not load."
+              );
             }
           }
         }
 
         if (active) {
-          setNotice([...new Set(warnings)].join(" "));
+          setNotice(
+            [...new Set(warnings)].join(" ")
+          );
         }
       } catch (failure) {
         if (active) {
@@ -297,7 +471,9 @@ export default function ScheduleDetails({ role }: Props) {
           );
         }
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     }
 
@@ -307,6 +483,10 @@ export default function ScheduleDetails({ role }: Props) {
       active = false;
     };
   }, [scheduleId, resident, refreshKey]);
+
+  // ========================================
+  // NAVIGATION
+  // ========================================
 
   const backPath = item
     ? `/${currentRole}/calendar/list/${item.date}`
@@ -332,9 +512,17 @@ export default function ScheduleDetails({ role }: Props) {
       }
     : null;
 
+  // ========================================
+  // MAIN USER INTERFACE
+  // ========================================
+
   return (
     <main className="flex h-[calc(100dvh-5rem)] min-h-0 flex-col overflow-hidden bg-white">
       <div className="mx-auto flex min-h-0 w-full max-w-[430px] flex-1 flex-col px-3 pb-3 pt-8">
+        {/* ====================================
+            HEADER
+        ==================================== */}
+
         <header className="shrink-0 rounded-t-xl bg-[#c90000] px-1 pb-3 pt-1">
           <div className="flex items-center gap-1">
             <Link
@@ -346,35 +534,60 @@ export default function ScheduleDetails({ role }: Props) {
             </Link>
 
             <h1 className="flex-1 text-sm font-bold text-white">
-              {resident ? "Schedule Details" : "Waste Collection"}
+              {resident
+                ? "Schedule Details"
+                : "Waste Collection"}
             </h1>
           </div>
         </header>
+
+        {/* ====================================
+            SCROLLABLE CONTENT
+        ==================================== */}
 
         <div
           aria-busy={loading}
           className="relative -mt-2 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain rounded-t-xl bg-white px-3 pb-6 pt-3"
         >
           {loading ? (
-            <p role="status" className="py-8 text-center text-xs text-neutral-500">
+            <p
+              role="status"
+              className="py-8 text-center text-xs text-neutral-500"
+            >
               Loading schedule details...
             </p>
           ) : error ? (
-            <p role="alert" className="rounded-xl bg-red-50 p-4 text-xs text-red-700">
+            <p
+              role="alert"
+              className="rounded-xl bg-red-50 p-4 text-xs text-red-700"
+            >
               {error}
             </p>
           ) : item ? (
             <>
+              {/* ====================================
+                  WARNING MESSAGE
+              ==================================== */}
+
               {notice && (
-                <p role="status" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
+                <p
+                  role="status"
+                  className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800"
+                >
                   {notice}
                 </p>
               )}
 
-              {/* Site summary */}
+              {/* ====================================
+                  SITE SUMMARY
+              ==================================== */}
+
               <section className="flex items-center gap-2 rounded-xl border border-neutral-300 bg-[#fff6f7] p-3 shadow-sm">
                 <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[#ffa7b1] text-[#ff1737]">
-                  <Trash2 size={30} strokeWidth={2.3} />
+                  <Trash2
+                    size={30}
+                    strokeWidth={2.3}
+                  />
                 </div>
 
                 <div className="min-w-0 flex-1">
@@ -391,13 +604,19 @@ export default function ScheduleDetails({ role }: Props) {
                   </h2>
 
                   <p className="mt-1 flex items-start gap-1 text-[10px]">
-                    <MapPin size={11} className="mt-0.5 shrink-0" />
+                    <MapPin
+                      size={11}
+                      className="mt-0.5 shrink-0"
+                    />
                     <span>{item.address}</span>
                   </p>
 
                   {resident ? (
                     <>
-                      <p className="mt-1 text-[10px]">{fullDate}</p>
+                      <p className="mt-1 text-[10px]">
+                        {fullDate}
+                      </p>
+
                       <p className="mt-1 text-[10px] font-semibold text-red-600">
                         {item.time}
                       </p>
@@ -410,17 +629,29 @@ export default function ScheduleDetails({ role }: Props) {
                 </div>
               </section>
 
-              <Panel title={resident ? "Schedule Information" : "Site Information"}>
+              {/* ====================================
+                  SCHEDULE INFORMATION
+              ==================================== */}
+
+              <Panel
+                title={
+                  resident
+                    ? "Schedule Information"
+                    : "Site Information"
+                }
+              >
                 <Row
                   icon={<CalendarDays size={13} />}
                   label="Collection Date"
                   value={fullDate}
                 />
+
                 <Row
                   icon={<Clock3 size={13} />}
                   label="Time"
                   value={item.time}
                 />
+
                 <Row
                   icon={<Trash2 size={13} />}
                   label="Collection Type"
@@ -430,20 +661,28 @@ export default function ScheduleDetails({ role }: Props) {
                     </Badge>
                   }
                 />
+
                 <Row
                   icon={<UserRound size={13} />}
                   label="Assigned Collector"
                   value={item.collector}
                 />
+
                 <Row
                   icon={<RefreshCw size={13} />}
                   label="Schedule Status"
                   value={
-                    <Badge color={collectionStatusColor(item.status)}>
+                    <Badge
+                      color={collectionStatusColor(
+                        item.status
+                      )}
+                    >
                       {item.status}
                     </Badge>
                   }
                 />
+
+                {/* COLLECTOR DETAILS */}
 
                 {!resident && (
                   <>
@@ -451,11 +690,16 @@ export default function ScheduleDetails({ role }: Props) {
                       <>
                         <Row
                           label="Collection Result"
-                          value={collection.collection_status}
+                          value={
+                            collection.collection_status
+                          }
                         />
+
                         <Row
                           label="Update Recorded"
-                          value={formatTimestamp(collection.completed_at)}
+                          value={formatTimestamp(
+                            collection.completed_at
+                          )}
                         />
                       </>
                     )}
@@ -464,6 +708,7 @@ export default function ScheduleDetails({ role }: Props) {
                       <p className="text-[10px] text-neutral-600">
                         Remarks
                       </p>
+
                       <p className="mt-2 whitespace-pre-wrap break-words rounded border bg-[#f8f3e8] p-2 text-xs">
                         {collection?.remarks ||
                           item.remarks ||
@@ -474,15 +719,27 @@ export default function ScheduleDetails({ role }: Props) {
                 )}
               </Panel>
 
+              {/* ====================================
+                  RESIDENT-ONLY INFORMATION
+              ==================================== */}
+
               {resident && (
                 <>
+                  {/* ====================================
+                      WASTE LEVEL INFORMATION
+                  ==================================== */}
+
                   <Panel title="Waste Level Information">
                     <div className="m-2 grid grid-cols-2 divide-x divide-red-200 rounded-xl border border-red-200 bg-[#fff6f7] p-3">
                       <div className="pr-2">
-                        <p className="text-[10px]">Waste Level</p>
+                        <p className="text-[10px]">
+                          Waste Level
+                        </p>
+
                         <p className="mt-3 text-sm font-bold">
                           {item.level || "Unavailable"}
                         </p>
+
                         <p className="mt-3 text-[9px] text-neutral-500">
                           {item.level === "FULL"
                             ? "Collection is prioritized."
@@ -495,26 +752,40 @@ export default function ScheduleDetails({ role }: Props) {
                       </div>
 
                       <div className="pl-3">
-                        <p className="text-[10px]">Confidence Level</p>
+                        <p className="text-[10px]">
+                          Confidence Level
+                        </p>
+
                         <p className="mt-3 text-sm font-bold">
                           {item.confidence}
                         </p>
+
                         <p className="mt-2 text-[9px] text-neutral-500">
                           Last Updated
                         </p>
+
                         <p className="mt-1 text-[9px]">
                           {item.analyzedAt
-                            ? formatTimestamp(item.analyzedAt)
+                            ? formatTimestamp(
+                                item.analyzedAt
+                              )
                             : "Unavailable"}
                         </p>
                       </div>
                     </div>
                   </Panel>
 
-                  <Panel title={`Recent Reports (${recentReports.length})`}>
+                  {/* ====================================
+                      RECENT REPORTS
+                  ==================================== */}
+
+                  <Panel
+                    title={`Recent Reports (${recentReports.length})`}
+                  >
                     {recentReports.length === 0 ? (
                       <p className="px-3 pb-3 text-xs text-neutral-500">
-                        No recent reports available to your account.
+                        No recent reports available to your
+                        account.
                       </p>
                     ) : (
                       <div
@@ -523,15 +794,23 @@ export default function ScheduleDetails({ role }: Props) {
                         className="flex gap-3 overflow-x-auto px-3 pb-3"
                       >
                         {recentReports.map((report) => (
-                          <div key={report.id} className="w-28 shrink-0">
+                          <div
+                            key={report.id}
+                            className="w-28 shrink-0"
+                          >
                             <Photo
                               source={report.image}
                               alt="Recent waste report"
                               className="h-20 w-full rounded-lg object-cover"
                             />
-                            <p className="mt-1 text-[9px]">{report.date}</p>
+
                             <p className="mt-1 text-[9px]">
-                              CNN Result: {report.level || "Pending"}
+                              {report.date}
+                            </p>
+
+                            <p className="mt-1 text-[9px]">
+                              CNN Result:{" "}
+                              {report.level || "Pending"}
                             </p>
                           </div>
                         ))}
@@ -540,6 +819,10 @@ export default function ScheduleDetails({ role }: Props) {
                   </Panel>
                 </>
               )}
+
+              {/* ====================================
+                  SITE LOCATION
+              ==================================== */}
 
               <Panel title="Site Location">
                 <Link
@@ -550,6 +833,7 @@ export default function ScheduleDetails({ role }: Props) {
                   }
                   state={{
                     selectedLocation,
+
                     site: {
                       id: item.siteId,
                       scheduleId: item.id,
@@ -572,17 +856,27 @@ export default function ScheduleDetails({ role }: Props) {
                     alt="Illustrative map preview"
                     className="h-28 w-full object-cover"
                   />
+
                   <MapPin
                     size={28}
-                    fill={resident ? "#ed0015" : "#008b4d"}
+                    fill={
+                      resident
+                        ? "#ed0015"
+                        : "#008b4d"
+                    }
                     color="white"
                     className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
                   />
+
                   <span className="absolute right-2 top-2 rounded bg-white px-2 py-1 text-[9px] text-red-600">
                     Open map
                   </span>
                 </Link>
               </Panel>
+
+              {/* ====================================
+                  COLLECTOR PHOTOS
+              ==================================== */}
 
               {!resident && (
                 <Panel
@@ -602,6 +896,7 @@ export default function ScheduleDetails({ role }: Props) {
                       title="Before Collection"
                       source={beforeImage}
                     />
+
                     <PhotoSlide
                       title="After Collection"
                       source={afterImage}
@@ -617,6 +912,10 @@ export default function ScheduleDetails({ role }: Props) {
   );
 }
 
+// ========================================
+// STATUS BADGE
+// ========================================
+
 function Badge({
   color,
   children,
@@ -625,11 +924,22 @@ function Badge({
   children: ReactNode;
 }) {
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-[9px] font-medium text-white ${color}`}>
+    <span
+      className={`
+        inline-block rounded-full
+        px-2 py-0.5 text-[9px]
+        font-medium text-white
+        ${color}
+      `}
+    >
       {children}
     </span>
   );
 }
+
+// ========================================
+// INFORMATION PANEL
+// ========================================
 
 function Panel({
   title,
@@ -643,10 +953,15 @@ function Panel({
       <h2 className="px-2 pb-2 pt-2 text-[11px] font-medium text-[#c90000]">
         {title}
       </h2>
+
       {children}
     </section>
   );
 }
+
+// ========================================
+// DETAIL ROW
+// ========================================
 
 function Row({
   icon,
@@ -660,13 +975,25 @@ function Row({
   return (
     <div className="grid grid-cols-2 items-start gap-3 border-b border-[#eee0cd] px-3 py-2 text-[10px] last:border-b-0">
       <span className="flex items-center gap-1.5 text-neutral-700">
-        {icon && <span className="shrink-0">{icon}</span>}
+        {icon && (
+          <span className="shrink-0">
+            {icon}
+          </span>
+        )}
+
         <span>{label}</span>
       </span>
-      <span className="min-w-0 break-words text-right">{value}</span>
+
+      <span className="min-w-0 break-words text-right">
+        {value}
+      </span>
     </div>
   );
 }
+
+// ========================================
+// IMAGE COMPONENT
+// ========================================
 
 function Photo({
   source,
@@ -704,6 +1031,10 @@ function Photo({
     />
   );
 }
+
+// ========================================
+// BEFORE AND AFTER PHOTO CARD
+// ========================================
 
 function PhotoSlide({
   title,

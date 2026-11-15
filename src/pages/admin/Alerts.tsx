@@ -1,10 +1,5 @@
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -24,33 +19,29 @@ import {
 
 import { supabase } from "../../lib/supabase";
 
-// ========================================
+// ==========================================
 // TYPES
-// ========================================
+// ==========================================
 
 type Severity = "critical" | "warning";
-type AlertFilter = "all" | "critical" | "warning";
+type AlertFilter = "all" | Severity;
 
-interface AlertItem {
-  id: string;
-  title: string;
-  description: string;
-  severity: Severity;
-  source: "bin" | "delay";
-  siteName: string;
-  createdAt: string;
-}
+type RejectionReason =
+  | "unrelated_image"
+  | "duplicate_or_spam"
+  | "unverifiable_location";
 
-interface ReportRow {
+type ReportRow = {
   report_id: string;
   user_id: string;
   site_id: string | null;
   address: string | null;
   cnn_detection_level: string | null;
   analyzed_at: string | null;
-}
+  date_uploaded: string;
+};
 
-interface ScheduleRow {
+type ScheduleRow = {
   schedule_id: string;
   site_id: string | null;
   source_report_id: string | null;
@@ -59,135 +50,118 @@ interface ScheduleRow {
   collection_time: string | null;
   status: string | null;
   created_at: string | null;
-}
+};
 
-interface StatusRow {
+type StatusRow = {
   report_id: string;
   status: string;
   created_at: string;
-}
+};
 
-interface CollectionRow {
+type CollectionRow = {
   schedule_id: string;
   collection_status: string | null;
   completed_at: string | null;
-}
+};
 
-interface SiteRow {
+type SiteRow = {
   site_id: string;
   site_name: string;
-}
+};
 
-interface CollectorRow {
+type CollectorRow = {
   user_id: string;
   full_name: string;
-}
+};
 
-interface DelayedOption {
-  scheduleId: string;
+type WasteImageRow = {
+  storage_bucket: string | null;
+  storage_path: string | null;
+};
+
+type AlertItem = {
+  id: string;
+  title: string;
+  description: string;
+  severity: Severity;
   siteName: string;
-  collectorName: string;
-  dayTime: string;
-}
+  createdAt: string;
+};
 
-// ========================================
-// HELPERS
-// ========================================
+type ReviewOption = {
+  reportId: string;
+  siteName: string;
+  reportDate: string;
+  level: string | null;
+  hasLinkedSite: boolean;
+};
 
-function normalize(
-  value: string | null | undefined
-): string {
+// ==========================================
+// REJECTION REASONS
+// ==========================================
+
+const REJECTION_REASONS: {
+  value: RejectionReason;
+  label: string;
+}[] = [
+  {
+    value: "unrelated_image",
+    label: "Unrelated or misleading image",
+  },
+  {
+    value: "duplicate_or_spam",
+    label: "Duplicate or spam report",
+  },
+  {
+    value: "unverifiable_location",
+    label: "Location cannot be verified",
+  },
+];
+
+// ==========================================
+// HELPER FUNCTIONS
+// ==========================================
+
+function normalize(value?: string | null) {
   return (value ?? "").trim().toLowerCase();
 }
 
-function isCompleted(
-  value: string | null | undefined
-): boolean {
-  return [
-    "completed",
-    "collected",
-    "done",
-  ].includes(normalize(value));
+function isCompleted(value?: string | null) {
+  return ["completed", "collected", "done"].includes(
+    normalize(value)
+  );
 }
 
-function isClosed(
-  value: string | null | undefined
-): boolean {
+function isClosed(value?: string | null) {
   return (
     isCompleted(value) ||
-    ["cancelled", "canceled"].includes(
+    ["cancelled", "canceled", "rejected"].includes(
       normalize(value)
     )
   );
 }
 
-function formatDate(
-  dateValue: string | null
-): string {
-  if (!dateValue) return "Date not set";
-
-  const match = dateValue.match(
-    /^(\d{4})-(\d{2})-(\d{2})$/
+function isReviewable(value?: string | null) {
+  return (
+    !normalize(value) ||
+    [
+      "under review",
+      "under_review",
+      "pending",
+      "submitted",
+      "new",
+      "awaiting review",
+    ].includes(normalize(value))
   );
-
-  if (!match) return dateValue;
-
-  const date = new Date(
-    Number(match[1]),
-    Number(match[2]) - 1,
-    Number(match[3])
-  );
-
-  if (Number.isNaN(date.getTime())) {
-    return dateValue;
-  }
-
-  return new Intl.DateTimeFormat("en-PH", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
 }
 
-function formatTime(
-  timeValue: string | null
-): string {
-  if (!timeValue) return "Time not set";
-
-  const match = timeValue.match(
-    /^(\d{1,2}):(\d{2})/
-  );
-
-  if (!match) return timeValue;
-
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-
-  if (
-    hour < 0 ||
-    hour > 23 ||
-    minute < 0 ||
-    minute > 59
-  ) {
-    return timeValue;
-  }
-
-  return `${hour % 12 || 12}:${String(
-    minute
-  ).padStart(2, "0")} ${
-    hour >= 12 ? "PM" : "AM"
-  }`;
-}
-
-function formatTimestamp(
-  value: string
-): string {
-  if (!value) return "";
+function formatTimestamp(value: string | null) {
+  if (!value) return "Time unavailable";
 
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    return "";
+    return "Time unavailable";
   }
 
   return new Intl.DateTimeFormat("en-PH", {
@@ -200,26 +174,153 @@ function formatTimestamp(
   }).format(date);
 }
 
-function createDelayedMessage(
-  siteName: string
+function formatDate(value: string | null) {
+  if (!value) return "Date not set";
+
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (!match) return value;
+
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3])
+  );
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-PH", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatTime(value: string | null) {
+  const match =
+    value && /^(\d{1,2}):(\d{2})/.exec(value);
+
+  if (!match) {
+    return value || "Time not set";
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+
+  if (hour > 23 || minute > 59) {
+    return value || "Time not set";
+  }
+
+  return `${hour % 12 || 12}:${String(
+    minute
+  ).padStart(2, "0")} ${
+    hour >= 12 ? "PM" : "AM"
+  }`;
+}
+
+// ==========================================
+// NORMALIZE STORAGE PATH
+// ==========================================
+
+function normalizeWasteImagePath(
+  input: string | null
+) {
+  if (!input?.trim()) return null;
+
+  let path = input.trim();
+
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      const match = new URL(path).pathname.match(
+        /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/i
+      );
+
+      if (
+        !match ||
+        decodeURIComponent(match[1]) !==
+          "waste-images"
+      ) {
+        return null;
+      }
+
+      path = decodeURIComponent(match[2]);
+    } catch {
+      return null;
+    }
+  }
+
+  path = path.replace(/^\/+/, "").split("?")[0];
+
+  while (
+    path.toLowerCase().startsWith("waste-images/")
+  ) {
+    path = path.slice("waste-images/".length);
+  }
+
+  return path && !path.endsWith("/")
+    ? path
+    : null;
+}
+
+// ==========================================
+// SHOW ACTUAL SUPABASE ERROR
+// ==========================================
+
+function describeSupabaseError(
+  failure: unknown
 ): string {
+  console.error(
+    "[WasteTrack] Reject and notify failed:",
+    failure
+  );
+
+  if (typeof failure === "string") {
+    return failure;
+  }
+
+  if (
+    failure &&
+    typeof failure === "object"
+  ) {
+    const error = failure as {
+      message?: string;
+      details?: string;
+      hint?: string;
+      code?: string;
+    };
+
+    return [
+      error.message || "Failed to reject report.",
+      error.details,
+      error.hint,
+      error.code
+        ? `Code: ${error.code}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" — ");
+  }
+
   return (
-    `Collection at ${siteName} has been delayed. ` +
-    "Please wait for an updated collection schedule. " +
-    "Thank you for your understanding."
+    "Failed to reject report. " +
+    "Please check the browser console."
   );
 }
 
-// ========================================
-// MAIN COMPONENT
-// ========================================
+// ==========================================
+// MAIN ADMIN ALERTS COMPONENT
+// ==========================================
 
 export default function Alerts() {
   // ========================================
-  // USER / ALERT STATES
+  // ADMIN ALERT STATES
   // ========================================
 
-  const [adminId, setAdminId] = useState("");
+  const [adminId, setAdminId] =
+    useState("");
 
   const [alerts, setAlerts] =
     useState<AlertItem[]>([]);
@@ -231,32 +332,42 @@ export default function Alerts() {
     useState<AlertFilter>("all");
 
   // ========================================
-  // NOTIFICATION STATES
+  // REPORT REVIEW STATES
   // ========================================
 
-  const [
-    delayedOptions,
-    setDelayedOptions,
-  ] = useState<DelayedOption[]>([]);
+  const [reviewOptions, setReviewOptions] =
+    useState<ReviewOption[]>([]);
 
-  const [
-    selectedSchedule,
-    setSelectedSchedule,
-  ] = useState("");
+  const [selectedReport, setSelectedReport] =
+    useState("");
 
-  const [reason, setReason] = useState("");
+  const [rejectionReason, setRejectionReason] =
+    useState<RejectionReason | "">("");
+
+  const [evidenceDetails, setEvidenceDetails] =
+    useState("");
+
+  const [evidenceConfirmed, setEvidenceConfirmed] =
+    useState(false);
+
+  const [reportImage, setReportImage] =
+    useState<string | null>(null);
+
+  const [imageLoading, setImageLoading] =
+    useState(false);
+
+  // ========================================
+  // SUBMISSION STATES
+  // ========================================
 
   const [sending, setSending] =
     useState(false);
 
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] =
+    useState(false);
 
   const [sendError, setSendError] =
     useState("");
-
-  // ========================================
-  // LOADING / ERROR
-  // ========================================
 
   const [loading, setLoading] =
     useState(true);
@@ -264,35 +375,38 @@ export default function Alerts() {
   const [error, setError] =
     useState("");
 
+  const [refreshKey, setRefreshKey] =
+    useState(0);
+
   // ========================================
-  // FETCH ALERTS
+  // LOAD SUPABASE DATA
   // ========================================
 
   useEffect(() => {
-    let mounted = true;
-    let requestNumber = 0;
+    let active = true;
+    let requestId = 0;
 
     async function loadAlerts() {
-      const request = ++requestNumber;
+      const request = ++requestId;
+
+      setLoading(true);
+      setError("");
 
       try {
-        setLoading(true);
-        setError("");
-
         // ==================================
-        // VERIFY ADMIN
+        // VERIFY ADMIN ACCOUNT
         // ==================================
 
         const {
-          data: authData,
+          data: auth,
           error: authError,
         } = await supabase.auth.getUser();
 
-        if (authError) throw authError;
+        if (authError) {
+          throw authError;
+        }
 
-        const user = authData.user;
-
-        if (!user) {
+        if (!auth.user) {
           throw new Error(
             "Please sign in as an administrator."
           );
@@ -303,8 +417,8 @@ export default function Alerts() {
           error: profileError,
         } = await supabase
           .from("users")
-          .select("role, is_active")
-          .eq("user_id", user.id)
+          .select("role,is_active")
+          .eq("user_id", auth.user.id)
           .maybeSingle();
 
         if (profileError) {
@@ -313,7 +427,7 @@ export default function Alerts() {
 
         if (
           profile?.role !== "admin" ||
-          profile?.is_active !== true
+          profile.is_active !== true
         ) {
           throw new Error(
             "Only active administrators can view alerts."
@@ -321,7 +435,7 @@ export default function Alerts() {
         }
 
         // ==================================
-        // LOAD SUPABASE TABLES
+        // FETCH DATABASE TABLES
         // ==================================
 
         const [
@@ -332,22 +446,20 @@ export default function Alerts() {
           sitesResult,
           collectorsResult,
         ] = await Promise.all([
-          // Uses analyzed_at, not created_at.
           supabase
             .from("waste_reports")
             .select(
-              "report_id, user_id, site_id, address, cnn_detection_level, analyzed_at"
+              "report_id,user_id,site_id,address,cnn_detection_level,analyzed_at,date_uploaded"
             )
-            .order("analyzed_at", {
+            .order("date_uploaded", {
               ascending: false,
-              nullsFirst: false,
             })
             .limit(1000),
 
           supabase
             .from("schedules")
             .select(
-              "schedule_id, site_id, source_report_id, assigned_collector_id, date, collection_time, status, created_at"
+              "schedule_id,site_id,source_report_id,assigned_collector_id,date,collection_time,status,created_at"
             )
             .order("created_at", {
               ascending: false,
@@ -357,7 +469,7 @@ export default function Alerts() {
           supabase
             .from("status")
             .select(
-              "report_id, status, created_at"
+              "report_id,status,created_at"
             )
             .order("created_at", {
               ascending: false,
@@ -367,46 +479,49 @@ export default function Alerts() {
           supabase
             .from("collections")
             .select(
-              "schedule_id, collection_status, completed_at"
+              "schedule_id,collection_status,completed_at"
             )
             .limit(1000),
 
           supabase
             .from("disposal_sites")
-            .select("site_id, site_name"),
+            .select("site_id,site_name"),
 
           supabase
             .from("users")
-            .select("user_id, full_name")
+            .select("user_id,full_name")
             .eq("role", "collector"),
         ]);
 
-        const errors = [
+        const fetchError = [
           reportsResult.error,
           schedulesResult.error,
           statusesResult.error,
           collectionsResult.error,
           sitesResult.error,
           collectorsResult.error,
-        ];
+        ].find(Boolean);
 
-        const firstError = errors.find(
-          (item) => item !== null
-        );
+        if (fetchError) {
+          throw fetchError;
+        }
 
-        if (firstError) {
-          throw new Error(firstError.message);
+        if (
+          !active ||
+          request !== requestId
+        ) {
+          return;
         }
 
         // ==================================
-        // FORMAT DATABASE RESULTS
+        // FORMAT RESULTS
         // ==================================
 
         const reports =
-          (reportsResult.data ?? []) as unknown as ReportRow[];
+          (reportsResult.data ?? []) as ReportRow[];
 
         const schedules =
-          (schedulesResult.data ?? []) as unknown as ScheduleRow[];
+          (schedulesResult.data ?? []) as ScheduleRow[];
 
         const statuses =
           (statusesResult.data ?? []) as StatusRow[];
@@ -425,335 +540,291 @@ export default function Alerts() {
         // ==================================
 
         const reportMap = new Map(
-          reports.map((item) => [
-            item.report_id,
-            item,
+          reports.map((row) => [
+            row.report_id,
+            row,
           ])
         );
 
         const siteMap = new Map(
-          sites.map((item) => [
-            item.site_id,
-            item.site_name,
+          sites.map((row) => [
+            row.site_id,
+            row.site_name,
           ])
         );
 
         const collectorMap = new Map(
-          collectors.map((item) => [
-            item.user_id,
-            item.full_name,
+          collectors.map((row) => [
+            row.user_id,
+            row.full_name,
           ])
         );
 
         // ==================================
-        // LATEST STATUS PER REPORT
+        // GET LATEST REPORT STATUS
         // ==================================
 
-        const latestStatusMap = new Map<
-          string,
-          string
-        >();
+        const latestStatus =
+          new Map<string, string>();
 
-        for (const item of statuses) {
-          if (
-            !latestStatusMap.has(item.report_id)
-          ) {
-            latestStatusMap.set(
-              item.report_id,
-              item.status
+        for (const row of statuses) {
+          if (!latestStatus.has(row.report_id)) {
+            latestStatus.set(
+              row.report_id,
+              row.status
             );
           }
         }
+
+        // ==================================
+        // FIND REPORTS AWAITING REVIEW
+        // ==================================
+
+        const reviewable = reports
+          .filter(
+            (row) =>
+              !!row.user_id &&
+              isReviewable(
+                latestStatus.get(row.report_id)
+              )
+          )
+          .map(
+            (row): ReviewOption => ({
+              reportId: row.report_id,
+
+              siteName:
+                (row.site_id &&
+                  siteMap.get(row.site_id)) ||
+                row.address ||
+                "Unregistered disposal location",
+
+              reportDate: formatTimestamp(
+                row.date_uploaded
+              ),
+
+              level: row.cnn_detection_level,
+
+              hasLinkedSite:
+                !!row.site_id &&
+                siteMap.has(row.site_id),
+            })
+          );
 
         // ==================================
         // COMPLETED COLLECTIONS
         // ==================================
 
-        const completedScheduleIds = new Set(
+        const completedSchedules = new Set(
           collections
             .filter(
-              (item) =>
+              (row) =>
                 isCompleted(
-                  item.collection_status
+                  row.collection_status
                 ) ||
-                item.completed_at !== null
+                row.completed_at !== null
             )
-            .map((item) => item.schedule_id)
+            .map((row) => row.schedule_id)
         );
 
-        const completedReportIds =
+        const completedReports =
           new Set<string>();
 
-        for (const schedule of schedules) {
+        for (const row of schedules) {
           if (
-            schedule.source_report_id &&
+            row.source_report_id &&
             (
-              isCompleted(schedule.status) ||
-              completedScheduleIds.has(
-                schedule.schedule_id
+              isCompleted(row.status) ||
+              completedSchedules.has(
+                row.schedule_id
               )
             )
           ) {
-            completedReportIds.add(
-              schedule.source_report_id
+            completedReports.add(
+              row.source_report_id
             );
           }
         }
 
         // ==================================
-        // CREATE ADMIN ALERTS
+        // GET LATEST REPORT PER SITE
         // ==================================
+
+        const latestSiteReports =
+          new Map<string, ReportRow>();
+
+        for (const row of reports) {
+          const key =
+            row.site_id ||
+            `report:${row.report_id}`;
+
+          if (!latestSiteReports.has(key)) {
+            latestSiteReports.set(key, row);
+          }
+        }
 
         const nextAlerts: AlertItem[] = [];
 
-        // Get the latest report for every bin.
-        const latestSiteReports = new Map<
-          string,
-          ReportRow
-        >();
-
-        for (const report of reports) {
-          const key =
-            report.site_id ||
-            `report:${report.report_id}`;
-
-          if (!latestSiteReports.has(key)) {
-            latestSiteReports.set(
-              key,
-              report
-            );
-          }
-        }
-
         // ==================================
-        // FULL / OVERFLOWING BIN ALERTS
+        // FULL AND OVERFLOWING BIN ALERTS
         // ==================================
 
         for (
-          const report of latestSiteReports.values()
+          const row of latestSiteReports.values()
         ) {
           const level = normalize(
-            report.cnn_detection_level
+            row.cnn_detection_level
           );
 
-          const isOverflowing =
-            level === "overflowing";
-
-          const isFull =
-            level === "full" ||
-            level === "high";
-
-          if (!isFull && !isOverflowing) {
-            continue;
-          }
-
-          const currentStatus =
-            latestStatusMap.get(
-              report.report_id
-            );
-
           if (
-            isCompleted(currentStatus) ||
-            completedReportIds.has(
-              report.report_id
-            )
+            ![
+              "full",
+              "high",
+              "overflowing",
+            ].includes(level)
           ) {
             continue;
           }
 
-          const siteName =
-            (
-              report.site_id
-                ? siteMap.get(report.site_id)
-                : null
+          if (
+            isClosed(
+              latestStatus.get(row.report_id)
             ) ||
-            report.address ||
-            "Unknown disposal site";
+            completedReports.has(row.report_id)
+          ) {
+            continue;
+          }
+
+          const overflowing =
+            level === "overflowing";
 
           nextAlerts.push({
-            id: `bin:${report.report_id}`,
-            title: isOverflowing
+            id: `bin:${row.report_id}`,
+
+            title: overflowing
               ? "Overflowing waste bin"
               : "Full waste bin",
-            description: isOverflowing
+
+            description: overflowing
               ? "This disposal site has an overflowing waste report that requires attention."
               : "This disposal site has a full-bin report that has not yet been resolved.",
+
             severity: "critical",
-            source: "bin",
-            siteName,
+
+            siteName:
+              (row.site_id &&
+                siteMap.get(row.site_id)) ||
+              row.address ||
+              "Unknown disposal site",
+
             createdAt:
-              report.analyzed_at ?? "",
+              row.analyzed_at ||
+              row.date_uploaded,
           });
         }
 
         // ==================================
         // DELAYED COLLECTION ALERTS
+        // ADMIN ONLY
         // ==================================
 
-        const nextDelayedOptions:
-          DelayedOption[] = [];
-
-        for (const schedule of schedules) {
-          const reportStatus =
-            schedule.source_report_id
-              ? latestStatusMap.get(
-                  schedule.source_report_id
+        for (const row of schedules) {
+          const relatedStatus =
+            row.source_report_id
+              ? latestStatus.get(
+                  row.source_report_id
                 )
-              : undefined;
+              : null;
 
-          const finished =
-            isClosed(schedule.status) ||
-            isClosed(reportStatus) ||
-            completedScheduleIds.has(
-              schedule.schedule_id
-            );
+          if (
+            isClosed(row.status) ||
+            isClosed(relatedStatus) ||
+            completedSchedules.has(
+              row.schedule_id
+            )
+          ) {
+            continue;
+          }
 
-          if (finished) continue;
+          if (
+            normalize(row.status) !== "delayed" &&
+            normalize(relatedStatus) !== "delayed"
+          ) {
+            continue;
+          }
 
-          const delayed =
-            normalize(schedule.status) ===
-              "delayed" ||
-            normalize(reportStatus) ===
-              "delayed";
+          const report = row.source_report_id
+            ? reportMap.get(row.source_report_id)
+            : undefined;
 
-          if (!delayed) continue;
-
-          const report =
-            schedule.source_report_id
-              ? reportMap.get(
-                  schedule.source_report_id
-                )
-              : undefined;
-
-          const siteName =
+          const collector =
             (
-              schedule.site_id
-                ? siteMap.get(schedule.site_id)
-                : null
-            ) ||
-            report?.address ||
-            "Unknown disposal site";
-
-          const collectorName =
-            (
-              schedule.assigned_collector_id
-                ? collectorMap.get(
-                    schedule.assigned_collector_id
-                  )
-                : null
+              row.assigned_collector_id &&
+              collectorMap.get(
+                row.assigned_collector_id
+              )
             ) ||
             "Not assigned";
 
-          const dayTime =
-            `${formatDate(schedule.date)} · ` +
-            formatTime(
-              schedule.collection_time
-            );
-
           nextAlerts.push({
-            id: `delay:${schedule.schedule_id}`,
-            title: "Collection delayed",
-            description:
-              `Collector: ${collectorName} · ` +
-              dayTime,
-            severity: "warning",
-            source: "delay",
-            siteName,
-            createdAt:
-              schedule.created_at ?? "",
-          });
+            id: `delay:${row.schedule_id}`,
 
-          // Only delayed schedules linked to
-          // resident reports can be notified.
-          if (
-            report?.user_id &&
-            schedule.source_report_id
-          ) {
-            nextDelayedOptions.push({
-              scheduleId:
-                schedule.schedule_id,
-              siteName,
-              collectorName,
-              dayTime,
-            });
-          }
+            title: "Collection delayed",
+
+            description:
+              `Collector: ${collector} · ` +
+              `${formatDate(row.date)} · ` +
+              formatTime(row.collection_time),
+
+            severity: "warning",
+
+            siteName:
+              (row.site_id &&
+                siteMap.get(row.site_id)) ||
+              report?.address ||
+              "Unknown disposal site",
+
+            createdAt:
+              row.created_at || "",
+          });
         }
 
         // ==================================
         // SORT ALERTS
         // ==================================
 
-        nextAlerts.sort((a, b) => {
-          if (
-            a.severity !== b.severity
-          ) {
-            return a.severity === "critical"
+        nextAlerts.sort((a, b) =>
+          a.severity !== b.severity
+            ? a.severity === "critical"
               ? -1
-              : 1;
-          }
-
-          const aTime =
-            Date.parse(a.createdAt) || 0;
-
-          const bTime =
-            Date.parse(b.createdAt) || 0;
-
-          return bTime - aTime;
-        });
-
-        if (
-          !mounted ||
-          request !== requestNumber
-        ) {
-          return;
-        }
+              : 1
+            : (Date.parse(b.createdAt) || 0) -
+              (Date.parse(a.createdAt) || 0)
+        );
 
         // ==================================
         // UPDATE STATES
         // ==================================
 
-        setAdminId(user.id);
+        setAdminId(auth.user.id);
         setAlerts(nextAlerts);
-        setDelayedOptions(
-          nextDelayedOptions
+        setReviewOptions(reviewable);
+
+        setSelectedReport((old) =>
+          reviewable.some(
+            (row) => row.reportId === old
+          )
+            ? old
+            : reviewable[0]?.reportId || ""
         );
 
-        setSelectedSchedule((previous) => {
-          const exists =
-            nextDelayedOptions.some(
-              (option) =>
-                option.scheduleId === previous
-            );
-
-          return exists
-            ? previous
-            : nextDelayedOptions[0]
-                ?.scheduleId || "";
-        });
-
-        setReason((previous) => {
-          if (
-            previous.trim() &&
-            nextDelayedOptions.length > 0
-          ) {
-            return previous;
-          }
-
-          return nextDelayedOptions.length
-            ? createDelayedMessage(
-                nextDelayedOptions[0].siteName
-              )
-            : "";
-        });
-
         // ==================================
-        // LOAD READ STATUS
+        // READ ALERTS
         // ==================================
 
         try {
           const saved = JSON.parse(
             localStorage.getItem(
-              `wastetrack-alert-read:${user.id}`
+              `wastetrack-alert-read:${auth.user.id}`
             ) || "[]"
           );
 
@@ -768,26 +839,24 @@ export default function Alerts() {
         } catch {
           setReadIds([]);
         }
-      } catch (err) {
+      } catch (failure) {
         console.error(
-          "[WasteTrack] Alerts error:",
-          err
+          "[WasteTrack] Load admin alerts:",
+          failure
         );
 
         if (
-          mounted &&
-          request === requestNumber
+          active &&
+          request === requestId
         ) {
           setError(
-            err instanceof Error
-              ? err.message
-              : "Unable to load alerts."
+            describeSupabaseError(failure)
           );
         }
       } finally {
         if (
-          mounted &&
-          request === requestNumber
+          active &&
+          request === requestId
         ) {
           setLoading(false);
         }
@@ -796,133 +865,208 @@ export default function Alerts() {
 
     void loadAlerts();
 
-    const handleFocus = () => {
-      if (mounted) {
+    const onFocus = () => {
+      if (active) {
         void loadAlerts();
       }
     };
 
-    window.addEventListener(
-      "focus",
-      handleFocus
-    );
+    window.addEventListener("focus", onFocus);
 
     return () => {
-      mounted = false;
-      requestNumber++;
+      active = false;
+      requestId++;
 
       window.removeEventListener(
         "focus",
-        handleFocus
+        onFocus
       );
     };
-  }, []);
+  }, [refreshKey]);
 
   // ========================================
-  // CALCULATED VALUES
+  // RESET FORM WHEN REPORT CHANGES
+  // ========================================
+
+  useEffect(() => {
+    setRejectionReason("");
+    setEvidenceDetails("");
+    setEvidenceConfirmed(false);
+    setSendError("");
+  }, [selectedReport]);
+
+  // ========================================
+  // LOAD REPORT PHOTO
+  // ========================================
+
+  useEffect(() => {
+    let active = true;
+
+    setReportImage(null);
+    setImageLoading(false);
+
+    if (!selectedReport) return;
+
+    setImageLoading(true);
+
+    async function loadPhoto() {
+      try {
+        const {
+          data,
+          error: photoError,
+        } = await supabase
+          .from("waste_images")
+          .select(
+            "storage_bucket,storage_path"
+          )
+          .eq("report_id", selectedReport)
+          .order("created_at", {
+            ascending: false,
+          })
+          .limit(1);
+
+        if (photoError) {
+          throw photoError;
+        }
+
+        const image =
+          (data?.[0] || null) as WasteImageRow | null;
+
+        if (
+          !image?.storage_path ||
+          (
+            image.storage_bucket &&
+            image.storage_bucket !==
+              "waste-images"
+          )
+        ) {
+          return;
+        }
+
+        const path = normalizeWasteImagePath(
+          image.storage_path
+        );
+
+        if (!path) return;
+
+        const {
+          data: signed,
+          error: storageError,
+        } = await supabase.storage
+          .from("waste-images")
+          .createSignedUrl(path, 3600);
+
+        if (storageError) {
+          throw storageError;
+        }
+
+        if (active) {
+          setReportImage(signed.signedUrl);
+        }
+      } catch (failure) {
+        console.warn(
+          "[WasteTrack] Unable to load report photo:",
+          failure
+        );
+      } finally {
+        if (active) {
+          setImageLoading(false);
+        }
+      }
+    }
+
+    void loadPhoto();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedReport]);
+
+  // ========================================
+  // ALERT COUNTS
   // ========================================
 
   const criticalCount = alerts.filter(
-    (item) =>
-      item.severity === "critical"
+    (row) => row.severity === "critical"
   ).length;
 
   const warningCount = alerts.filter(
-    (item) =>
-      item.severity === "warning"
+    (row) => row.severity === "warning"
   ).length;
 
   const unreadCount = alerts.filter(
-    (item) =>
-      !readIds.includes(item.id)
+    (row) => !readIds.includes(row.id)
   ).length;
 
-  const filteredAlerts = useMemo(() => {
-    if (filter === "all") {
-      return alerts;
-    }
+  const filteredAlerts = useMemo(
+    () =>
+      filter === "all"
+        ? alerts
+        : alerts.filter(
+            (row) => row.severity === filter
+          ),
+    [alerts, filter]
+  );
 
-    return alerts.filter(
-      (item) => item.severity === filter
-    );
-  }, [alerts, filter]);
-
-  const selectedOption = delayedOptions.find(
-    (item) =>
-      item.scheduleId === selectedSchedule
+  const selectedOption = reviewOptions.find(
+    (row) => row.reportId === selectedReport
   );
 
   // ========================================
-  // READ ACTIONS
+  // ADMIN READ STATUS
   // ========================================
 
-  function saveReadIds(nextIds: string[]) {
-    setReadIds(nextIds);
+  function saveReadIds(ids: string[]) {
+    setReadIds(ids);
 
     if (!adminId) return;
 
     try {
       localStorage.setItem(
         `wastetrack-alert-read:${adminId}`,
-        JSON.stringify(nextIds)
+        JSON.stringify(ids)
       );
     } catch {
-      // Storage may be unavailable.
+      // Local storage might be unavailable.
     }
   }
 
-  function handleMarkAllRead() {
-    const next = Array.from(
-      new Set([
-        ...readIds,
-        ...alerts.map((item) => item.id),
-      ])
+  function markAllRead() {
+    saveReadIds(
+      Array.from(
+        new Set([
+          ...readIds,
+          ...alerts.map((row) => row.id),
+        ])
+      )
     );
-
-    saveReadIds(next);
   }
 
-  function handleMarkRead(id: string) {
-    if (readIds.includes(id)) return;
-
-    saveReadIds([
-      ...readIds,
-      id,
-    ]);
+  function markRead(id: string) {
+    if (!readIds.includes(id)) {
+      saveReadIds([...readIds, id]);
+    }
   }
 
   // ========================================
-  // SELECT DELAYED COLLECTION
+  // SELECT REPORT
   // ========================================
 
-  function handleSelectSchedule(
-    scheduleId: string
-  ) {
-    setSelectedSchedule(scheduleId);
+  function selectReport(id: string) {
+    setSelectedReport(id);
+    setRejectionReason("");
+    setEvidenceDetails("");
+    setEvidenceConfirmed(false);
     setSent(false);
     setSendError("");
-
-    const option = delayedOptions.find(
-      (item) =>
-        item.scheduleId === scheduleId
-    );
-
-    setReason(
-      option
-        ? createDelayedMessage(
-            option.siteName
-          )
-        : ""
-    );
   }
 
   // ========================================
-  // SEND RESIDENT NOTIFICATION
+  // REJECT REPORT AND NOTIFY RESIDENT
   // ========================================
 
-  async function handleSend() {
+  async function rejectAndNotify() {
     if (
-      !selectedSchedule ||
       !selectedOption ||
       sending ||
       sent
@@ -930,11 +1074,34 @@ export default function Alerts() {
       return;
     }
 
-    const message = reason.trim();
-
-    if (message.length < 10) {
+    // Rejection reason is required.
+    if (
+      !rejectionReason ||
+      !REJECTION_REASONS.some(
+        (row) =>
+          row.value === rejectionReason
+      )
+    ) {
       setSendError(
-        "Please enter at least 10 characters."
+        "Choose one of the three permitted rejection reasons."
+      );
+      return;
+    }
+
+    // Explanation is optional.
+    const details = evidenceDetails.trim();
+
+    if (details.length > 1000) {
+      setSendError(
+        "Optional explanation must be 1000 characters or fewer."
+      );
+      return;
+    }
+
+    // Admin confirmation is required.
+    if (!evidenceConfirmed) {
+      setSendError(
+        "Confirm you reviewed the submission and selected the correct rejection reason."
       );
       return;
     }
@@ -944,45 +1111,68 @@ export default function Alerts() {
     setSendError("");
 
     try {
-      // Secure Supabase database function.
-      // This independently checks the admin
-      // and confirms the collection is delayed.
+      // ==================================
+      // SUPABASE RPC
+      // ==================================
 
       const {
-        data: recipientId,
-        error: notificationError,
+        data,
+        error: rpcError,
       } = await supabase.rpc(
-        "wt_admin_send_delayed_notice",
+        "wt_admin_reject_invalid_report",
         {
-          p_schedule_id:
-            selectedSchedule,
-          p_message: message,
+          p_report_id:
+            selectedOption.reportId,
+
+          p_reason:
+            rejectionReason,
+
+          p_details:
+            details,
+
+          p_confirmed:
+            true,
         }
       );
 
-      if (notificationError) {
+      if (rpcError) {
+        throw rpcError;
+      }
+
+      if (!data) {
         throw new Error(
-          notificationError.message
+          "Supabase returned no notification ID after rejection."
         );
       }
 
-      if (!recipientId) {
-        throw new Error(
-          "The notification was not saved."
-        );
-      }
+      // ==================================
+      // SUCCESS
+      // ==================================
 
       setSent(true);
-    } catch (err) {
-      console.error(
-        "[WasteTrack] Notification error:",
-        err
+
+      const rejectedId =
+        selectedOption.reportId;
+
+      const remaining =
+        reviewOptions.filter(
+          (row) =>
+            row.reportId !== rejectedId
+        );
+
+      setReviewOptions(remaining);
+
+      setSelectedReport(
+        remaining[0]?.reportId || ""
       );
 
+      setRejectionReason("");
+      setEvidenceDetails("");
+      setEvidenceConfirmed(false);
+    } catch (failure: unknown) {
+      // Displays message, details, hint, and code.
       setSendError(
-        err instanceof Error
-          ? err.message
-          : "Failed to send notification."
+        describeSupabaseError(failure)
       );
     } finally {
       setSending(false);
@@ -990,24 +1180,23 @@ export default function Alerts() {
   }
 
   // ========================================
-  // MAIN UI
+  // USER INTERFACE
   // ========================================
 
   return (
     <main className="min-h-[100dvh] w-full bg-[#FFFCF8] font-['Fira_Sans',Arial,sans-serif] text-[#242424]">
 
-      {/* ====================================
-          HEADER
-      ==================================== */}
+      {/* HEADER */}
 
       <header className="border-b-[5px] border-[#A5B26B] bg-white">
         <div className="mx-auto flex w-full max-w-[1500px] flex-wrap items-center justify-between gap-4 px-4 py-5 sm:px-6 lg:px-8">
+
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#FCE8E8] text-[#B5202A] sm:h-12 sm:w-12">
               <Bell size={23} />
             </div>
 
-            <div className="min-w-0">
+            <div>
               <h1 className="text-[23px] font-extrabold tracking-tight sm:text-[28px]">
                 Alerts
               </h1>
@@ -1020,12 +1209,9 @@ export default function Alerts() {
 
           <button
             type="button"
-            onClick={handleMarkAllRead}
-            disabled={
-              loading ||
-              unreadCount === 0
-            }
-            className="inline-flex items-center gap-2 rounded-xl border border-[#E7DDD0] bg-white px-3 py-2.5 text-xs font-bold text-[#A81B1E] transition hover:bg-[#FFF0EC] disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={markAllRead}
+            disabled={loading || unreadCount === 0}
+            className="inline-flex items-center gap-2 rounded-xl border border-[#E7DDD0] bg-white px-3 py-2.5 text-xs font-bold text-[#A81B1E] hover:bg-[#FFF0EC] disabled:cursor-not-allowed disabled:opacity-40"
           >
             <CheckCheck size={16} />
             Mark all as read
@@ -1033,13 +1219,12 @@ export default function Alerts() {
         </div>
       </header>
 
-      {/* ====================================
-          CONTENT
-      ==================================== */}
+      {/* MAIN CONTENT */}
 
       <div className="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
 
         {/* LOADING */}
+
         {loading && (
           <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-2xl bg-white">
             <LoaderCircle
@@ -1053,38 +1238,43 @@ export default function Alerts() {
           </div>
         )}
 
-        {/* ERROR */}
+        {/* LOAD ERROR */}
+
         {!loading && error && (
           <div
             role="alert"
-            className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-5"
+            className="rounded-2xl border border-red-200 bg-red-50 p-5"
           >
-            <AlertCircle
-              size={21}
-              className="shrink-0 text-[#B5202A]"
-            />
+            <p className="text-sm font-bold text-red-700">
+              Unable to load alerts
+            </p>
 
-            <div>
-              <p className="text-sm font-bold text-[#9F1C26]">
-                Unable to load alerts
-              </p>
+            <p className="mt-2 break-words text-xs text-red-700">
+              {error}
+            </p>
 
-              <p className="mt-1 break-words text-xs text-red-700">
-                {error}
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={() =>
+                setRefreshKey(
+                  (key) => key + 1
+                )
+              }
+              className="mt-3 text-xs font-bold text-red-700"
+            >
+              Try Again
+            </button>
           </div>
         )}
 
         {!loading && !error && (
           <>
-            {/* ====================================
-                SUMMARY CARDS
-            ==================================== */}
+            {/* SUMMARY CARDS */}
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
 
-              {/* CRITICAL */}
+              {/* CRITICAL ALERTS */}
+
               <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#F3D8D8] bg-white p-4 shadow-sm sm:p-5">
                 <div>
                   <p className="text-xs font-semibold text-[#777]">
@@ -1100,12 +1290,13 @@ export default function Alerts() {
                   </p>
                 </div>
 
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#FCE8E8] text-[#B5202A]">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FCE8E8] text-[#B5202A]">
                   <ShieldAlert size={24} />
                 </div>
               </div>
 
-              {/* DELAYS */}
+              {/* COLLECTION DELAYS */}
+
               <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#F0E1BE] bg-white p-4 shadow-sm sm:p-5">
                 <div>
                   <p className="text-xs font-semibold text-[#777]">
@@ -1121,12 +1312,13 @@ export default function Alerts() {
                   </p>
                 </div>
 
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#FFF1D2] text-[#B8860B]">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF1D2] text-[#B8860B]">
                   <Clock3 size={24} />
                 </div>
               </div>
 
-              {/* UNREAD */}
+              {/* UNREAD ALERTS */}
+
               <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#E1E8D2] bg-white p-4 shadow-sm sm:p-5">
                 <div>
                   <p className="text-xs font-semibold text-[#777]">
@@ -1142,38 +1334,31 @@ export default function Alerts() {
                   </p>
                 </div>
 
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#EEF3E2] text-[#718B42]">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#EEF3E2] text-[#718B42]">
                   <Bell size={24} />
                 </div>
               </div>
             </div>
 
-            {/* ====================================
-                MAIN TWO-COLUMN LAYOUT
-            ==================================== */}
+            {/* TWO-COLUMN LAYOUT */}
 
             <div className="mt-6 grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,1fr)]">
 
-              {/* ==================================
-                  LEFT: ACTIVE ALERTS
-              ================================== */}
+              {/* LEFT: ACTIVE ALERTS */}
 
               <section className="min-w-0">
+                <div className="mb-4">
+                  <h2 className="text-[17px] font-extrabold text-[#282828]">
+                    Active alerts
+                  </h2>
 
-                {/* SECTION HEADER */}
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-[17px] font-extrabold text-[#282828]">
-                      Active alerts
-                    </h2>
-
-                    <p className="mt-1 text-[11px] text-[#888]">
-                      {alerts.length} alerts found
-                    </p>
-                  </div>
+                  <p className="mt-1 text-[11px] text-[#888]">
+                    {alerts.length} alerts found
+                  </p>
                 </div>
 
-                {/* FILTER TABS */}
+                {/* ALERT FILTER BUTTONS */}
+
                 <div className="mb-4 flex flex-wrap gap-2">
                   {(
                     [
@@ -1193,49 +1378,49 @@ export default function Alerts() {
                         count: warningCount,
                       },
                     ] as const
-                  ).map((item) => (
+                  ).map((tab) => (
                     <button
-                      key={item.value}
+                      key={tab.value}
                       type="button"
                       onClick={() =>
-                        setFilter(item.value)
+                        setFilter(tab.value)
                       }
                       aria-pressed={
-                        filter === item.value
+                        filter === tab.value
                       }
-                      className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-[12px] font-bold transition ${
-                        filter === item.value
-                          ? "bg-[#A81B1E] text-white shadow-sm"
+                      className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition ${
+                        filter === tab.value
+                          ? "bg-[#A81B1E] text-white"
                           : "border border-[#E7DDD0] bg-white text-[#666] hover:bg-[#F7F0E4]"
                       }`}
                     >
-                      {item.label}
+                      {tab.label}
 
                       <span
                         className={`rounded-md px-1.5 py-0.5 text-[10px] ${
-                          filter === item.value
+                          filter === tab.value
                             ? "bg-white/20 text-white"
                             : "bg-[#F2EDE5] text-[#777]"
                         }`}
                       >
-                        {item.count}
+                        {tab.count}
                       </span>
                     </button>
                   ))}
                 </div>
 
-                {/* ==================================
-                    ALERT LIST
-                ================================== */}
+                {/* ALERT LIST */}
 
                 <div className="space-y-3">
+
                   {filteredAlerts.length === 0 && (
                     <div className="flex min-h-[220px] flex-col items-center justify-center rounded-2xl border border-[#EAE2D7] bg-white p-6 text-center">
-                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#EEF3E6] text-[#788E51]">
-                        <Inbox size={26} />
-                      </div>
+                      <Inbox
+                        size={26}
+                        className="text-[#788E51]"
+                      />
 
-                      <p className="mt-4 text-sm font-bold text-[#333]">
+                      <p className="mt-4 text-sm font-bold">
                         No alerts to display
                       </p>
 
@@ -1246,79 +1431,76 @@ export default function Alerts() {
                   )}
 
                   {filteredAlerts.map((alert) => {
-                    const isCritical =
+                    const critical =
                       alert.severity === "critical";
 
-                    const isRead =
+                    const read =
                       readIds.includes(alert.id);
 
                     return (
                       <article
                         key={alert.id}
-                        className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition hover:shadow-md ${
-                          isCritical
+                        className={`overflow-hidden rounded-2xl border bg-white shadow-sm ${
+                          critical
                             ? "border-[#F1D8D8]"
                             : "border-[#F0E4C9]"
                         } ${
-                          isRead
-                            ? "opacity-70"
-                            : ""
+                          read ? "opacity-70" : ""
                         }`}
                       >
-                        {/* COLORED TOP BAR */}
+                        {/* ALERT COLOR STRIPE */}
+
                         <div
-                          className={`h-1.5 w-full ${
-                            isCritical
+                          className={`h-1.5 ${
+                            critical
                               ? "bg-[#C42A34]"
                               : "bg-[#E6AE36]"
                           }`}
                         />
 
                         <div className="p-4 sm:p-5">
-                          {/* TOP ROW */}
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="flex min-w-0 flex-1 items-start gap-3">
-                              <div
-                                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
-                                  isCritical
-                                    ? "bg-[#FCE9E9] text-[#C42A34]"
-                                    : "bg-[#FFF1D3] text-[#B8860B]"
+
+                          {/* ALERT ICON AND TITLE */}
+
+                          <div className="flex items-start gap-3">
+                            <div
+                              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
+                                critical
+                                  ? "bg-[#FCE9E9] text-[#C42A34]"
+                                  : "bg-[#FFF1D3] text-[#B8860B]"
+                              }`}
+                            >
+                              <AlertTriangle size={22} />
+                            </div>
+
+                            <div className="min-w-0 flex-1">
+                              <span
+                                className={`rounded-md px-2.5 py-1 text-[10px] font-extrabold uppercase ${
+                                  critical
+                                    ? "bg-[#FCE9E9] text-[#B5202A]"
+                                    : "bg-[#FFF1D3] text-[#946A0C]"
                                 }`}
                               >
-                                <AlertTriangle size={22} />
-                              </div>
+                                {critical
+                                  ? "Critical"
+                                  : "Warning"}
+                              </span>
 
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span
-                                    className={`inline-flex rounded-md px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${
-                                      isCritical
-                                        ? "bg-[#FCE9E9] text-[#B5202A]"
-                                        : "bg-[#FFF1D3] text-[#946A0C]"
-                                    }`}
-                                  >
-                                    {isCritical
-                                      ? "Critical"
-                                      : "Warning"}
-                                  </span>
+                              {!read && (
+                                <span className="ml-2 text-[10px] font-bold text-[#A81B1E]">
+                                  New
+                                </span>
+                              )}
 
-                                  {!isRead && (
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#A81B1E]">
-                                      <span className="h-1.5 w-1.5 rounded-full bg-[#D0102B]" />
-                                      New
-                                    </span>
-                                  )}
-                                </div>
-
-                                <h3 className="mt-2 break-words text-[15px] font-extrabold leading-snug text-[#292929]">
-                                  {alert.title}
-                                </h3>
-                              </div>
+                              <h3 className="mt-2 break-words text-[15px] font-extrabold">
+                                {alert.title}
+                              </h3>
                             </div>
                           </div>
 
-                          {/* SITE */}
-                          <div className="mt-4 flex items-start gap-2 text-[12px] font-semibold text-[#555]">
+                          {/* LOCATION */}
+
+                          <p className="mt-4 flex items-start gap-2 text-xs font-semibold text-[#555]">
                             <MapPin
                               size={15}
                               className="mt-0.5 shrink-0 text-[#A81B1E]"
@@ -1327,25 +1509,26 @@ export default function Alerts() {
                             <span className="break-words">
                               {alert.siteName}
                             </span>
-                          </div>
+                          </p>
 
-                          {/* DESCRIPTION */}
-                          <p className="mt-3 text-[12px] leading-[1.75] text-[#777]">
+                          {/* ALERT DESCRIPTION */}
+
+                          <p className="mt-3 text-xs leading-relaxed text-[#777]">
                             {alert.description}
                           </p>
 
-                          {/* BOTTOM ROW */}
-                          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#F0EAE2] pt-3">
-                            <div className="flex items-center gap-1.5 text-[11px] text-[#999]">
-                              <CalendarClock size={14} />
+                          {/* ALERT TIME */}
 
+                          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#F0EAE2] pt-3">
+                            <span className="flex items-center gap-1 text-[11px] text-[#999]">
+                              <CalendarClock size={14} />
                               {formatTimestamp(
                                 alert.createdAt
-                              ) || "Time unavailable"}
-                            </div>
+                              )}
+                            </span>
 
-                            {isRead ? (
-                              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#8A9A72]">
+                            {read ? (
+                              <span className="flex items-center gap-1 text-[11px] text-[#8A9A72]">
                                 <Check size={14} />
                                 Read
                               </span>
@@ -1353,11 +1536,9 @@ export default function Alerts() {
                               <button
                                 type="button"
                                 onClick={() =>
-                                  handleMarkRead(
-                                    alert.id
-                                  )
+                                  markRead(alert.id)
                                 }
-                                className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#A81B1E] hover:underline"
+                                className="flex items-center gap-1 text-[11px] font-bold text-[#A81B1E] hover:underline"
                               >
                                 <Check size={14} />
                                 Mark as read
@@ -1371,36 +1552,37 @@ export default function Alerts() {
                 </div>
               </section>
 
-              {/* ==================================
-                  RIGHT: RESIDENT NOTIFICATION
-              ================================== */}
+              {/* RIGHT: REJECTION FORM */}
 
               <aside className="min-w-0 lg:sticky lg:top-5">
                 <div className="overflow-hidden rounded-2xl border border-[#E9DECD] bg-white shadow-sm">
 
                   {/* PANEL HEADER */}
+
                   <div className="bg-[#F7F0E4] px-5 py-5">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#A81B1E] text-white">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#A81B1E] text-white">
                         <MessageSquareText size={21} />
                       </div>
 
                       <div>
                         <h2 className="text-[15px] font-extrabold">
-                          Notify resident
+                          Review invalid submissions
                         </h2>
 
                         <p className="mt-0.5 text-[11px] text-[#777]">
-                          Delayed collections only
+                          Reject invalid reports and notify their residents
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  {/* PANEL BODY */}
+                  {/* FORM BODY */}
+
                   <div className="space-y-5 p-5">
 
-                    {/* INFO */}
+                    {/* REVIEW POLICY */}
+
                     <div className="flex items-start gap-2 rounded-xl border border-[#F1E2C0] bg-[#FFF8E9] p-3">
                       <AlertCircle
                         size={17}
@@ -1408,128 +1590,224 @@ export default function Alerts() {
                       />
 
                       <p className="text-[11px] leading-relaxed text-[#8A681E]">
-                        Residents can only receive
-                        notifications for collections
-                        officially marked as delayed.
+                        Reject only confirmed invalid submissions:
+                        unrelated images, duplicate or spam reports,
+                        or unverifiable locations. A CNN prediction
+                        alone is not proof of invalidity.
                       </p>
                     </div>
 
-                    {/* SELECT COLLECTION */}
+                    {/* SELECT REPORT */}
+
                     <div>
                       <label
-                        htmlFor="al-schedule"
-                        className="mb-2 block text-[12px] font-bold text-[#555]"
+                        htmlFor="al-report"
+                        className="mb-2 block text-xs font-bold text-[#555]"
                       >
-                        Delayed collection
+                        Report awaiting review
                       </label>
 
                       <select
-                        id="al-schedule"
-                        value={selectedSchedule}
-                        onChange={(event) =>
-                          handleSelectSchedule(
-                            event.target.value
-                          )
+                        id="al-report"
+                        value={selectedReport}
+                        onChange={(e) =>
+                          selectReport(e.target.value)
                         }
                         disabled={
                           sending ||
-                          delayedOptions.length === 0
+                          reviewOptions.length === 0
                         }
-                        className="w-full rounded-xl border border-[#DFD6C9] bg-[#FFFCF8] px-3 py-3 text-[12px] text-[#333] outline-none transition focus:border-[#A5B26B] focus:ring-2 focus:ring-[#A5B26B]/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="w-full rounded-xl border border-[#DFD6C9] bg-[#FFFCF8] px-3 py-3 text-xs outline-none focus:border-[#A5B26B] disabled:opacity-60"
                       >
-                        {delayedOptions.length === 0 ? (
+                        {reviewOptions.length === 0 ? (
                           <option value="">
-                            No delayed collections
+                            No reports awaiting review
                           </option>
                         ) : (
-                          delayedOptions.map(
-                            (option) => (
-                              <option
-                                key={
-                                  option.scheduleId
-                                }
-                                value={
-                                  option.scheduleId
-                                }
-                              >
-                                {option.siteName} —{" "}
-                                {option.dayTime}
-                              </option>
-                            )
-                          )
+                          reviewOptions.map((row) => (
+                            <option
+                              key={row.reportId}
+                              value={row.reportId}
+                            >
+                              {row.siteName} —{" "}
+                              {row.reportId.slice(0, 8)}
+                            </option>
+                          ))
                         )}
                       </select>
                     </div>
 
-                    {/* SELECTED COLLECTION DETAILS */}
+                    {/* SELECTED REPORT DETAILS */}
+
                     {selectedOption && (
-                      <div className="rounded-xl border border-[#E7EEDB] bg-[#F7FAF1] p-3.5">
+                      <div className="space-y-3 rounded-xl border border-[#E7EEDB] bg-[#F7FAF1] p-3.5">
                         <p className="text-[10px] font-bold uppercase tracking-wide text-[#728653]">
-                          Selected collection
+                          Submission to review
                         </p>
 
-                        <p className="mt-2 break-words text-[12px] font-bold text-[#354527]">
+                        <p className="break-words text-xs font-bold text-[#354527]">
                           {selectedOption.siteName}
                         </p>
 
-                        <p className="mt-1 text-[11px] text-[#65745B]">
-                          Collector:{" "}
-                          {selectedOption.collectorName}
+                        <p className="break-all text-[11px] text-[#65745B]">
+                          Report ID:{" "}
+                          {selectedOption.reportId}
                         </p>
 
-                        <p className="mt-1 text-[11px] text-[#65745B]">
-                          {selectedOption.dayTime}
+                        <p className="text-[11px] text-[#65745B]">
+                          {selectedOption.reportDate}
                         </p>
+
+                        <p className="text-[11px] text-[#65745B]">
+                          CNN:{" "}
+                          {selectedOption.level ||
+                            "Not available"}
+                          {" · "}
+                          Site record:{" "}
+                          {selectedOption.hasLinkedSite
+                            ? "Linked"
+                            : "Not linked"}
+                        </p>
+
+                        {/* REPORT PHOTO */}
+
+                        {imageLoading ? (
+                          <p className="text-xs text-[#777]">
+                            Loading submitted photo...
+                          </p>
+                        ) : reportImage ? (
+                          <img
+                            src={reportImage}
+                            alt="Resident-submitted waste report"
+                            className="max-h-[300px] w-full rounded-xl bg-white object-contain"
+                          />
+                        ) : (
+                          <p className="text-xs text-[#777]">
+                            Photo unavailable here.
+                            Inspect the original report
+                            before rejecting.
+                          </p>
+                        )}
                       </div>
                     )}
 
-                    {/* MESSAGE */}
+                    {/* REJECTION REASON */}
+
+                    <div>
+                      <label
+                        htmlFor="al-reason"
+                        className="mb-2 block text-xs font-bold text-[#555]"
+                      >
+                        Invalid submission reason
+                      </label>
+
+                      <select
+                        id="al-reason"
+                        value={rejectionReason}
+                        onChange={(e) => {
+                          setRejectionReason(
+                            e.target.value as
+                              RejectionReason | ""
+                          );
+
+                          setSent(false);
+                          setSendError("");
+                        }}
+                        disabled={
+                          sending ||
+                          !selectedOption
+                        }
+                        className="w-full rounded-xl border border-[#DFD6C9] bg-[#FFFCF8] px-3 py-3 text-xs outline-none focus:border-[#A5B26B] disabled:opacity-60"
+                      >
+                        <option value="">
+                          Choose a reason
+                        </option>
+
+                        {REJECTION_REASONS.map((row) => (
+                          <option
+                            key={row.value}
+                            value={row.value}
+                          >
+                            {row.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* OPTIONAL EXPLANATION */}
+
                     <div>
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <label
-                          htmlFor="al-message"
-                          className="text-[12px] font-bold text-[#555]"
+                          htmlFor="al-evidence"
+                          className="text-xs font-bold text-[#555]"
                         >
-                          Notification message
+                          Evidence / explanation (optional)
                         </label>
 
                         <span className="text-[10px] text-[#999]">
-                          {reason.length}/1000
+                          {evidenceDetails.length}/1000
                         </span>
                       </div>
 
                       <textarea
-                        id="al-message"
-                        rows={6}
+                        id="al-evidence"
+                        rows={5}
                         maxLength={1000}
-                        value={reason}
-                        disabled={
-                          sending ||
-                          delayedOptions.length === 0
-                        }
-                        onChange={(event) => {
-                          setReason(
-                            event.target.value
-                          );
-                          setSent(false);
+                        value={evidenceDetails}
+                        onChange={(e) => {
+                          setEvidenceDetails(e.target.value);
                           setSendError("");
                         }}
-                        placeholder="Enter the collection delay notice..."
-                        className="w-full resize-y rounded-xl border border-[#DFD6C9] bg-[#FFFCF8] px-3 py-3 text-[12px] leading-relaxed text-[#333] outline-none transition focus:border-[#A5B26B] focus:ring-2 focus:ring-[#A5B26B]/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={
+                          sending ||
+                          !selectedOption
+                        }
+                        placeholder="Optional: provide additional explanation if needed."
+                        className="w-full resize-y rounded-xl border border-[#DFD6C9] bg-[#FFFCF8] px-3 py-3 text-xs leading-relaxed outline-none focus:border-[#A5B26B] disabled:opacity-60"
                       />
                     </div>
 
-                    {/* SEND BUTTON */}
+                    {/* CONFIRMATION */}
+
+                    <label className="flex cursor-pointer items-start gap-2 text-xs leading-relaxed text-[#555]">
+                      <input
+                        type="checkbox"
+                        checked={evidenceConfirmed}
+                        onChange={(e) =>
+                          setEvidenceConfirmed(
+                            e.target.checked
+                          )
+                        }
+                        disabled={
+                          sending ||
+                          !selectedOption
+                        }
+                        className="mt-0.5 h-4 w-4 accent-[#A81B1E]"
+                      />
+
+                      <span>
+                        I reviewed the submission and confirm
+                        the selected rejection reason is accurate.
+                        The resident will receive that reason.
+                      </span>
+                    </label>
+
+                    {/* SUBMIT BUTTON */}
+
                     <button
                       type="button"
-                      onClick={handleSend}
+                      onClick={() =>
+                        void rejectAndNotify()
+                      }
                       disabled={
                         sending ||
                         sent ||
                         !selectedOption ||
-                        reason.trim().length < 10
+                        !rejectionReason ||
+                        !evidenceConfirmed
                       }
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#A81B1E] px-4 py-3.5 text-[13px] font-bold text-white shadow-sm transition hover:bg-[#8F1619] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#A81B1E] px-4 py-3.5 text-[13px] font-bold text-white hover:bg-[#8F1619] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {sending ? (
                         <LoaderCircle
@@ -1543,55 +1821,51 @@ export default function Alerts() {
                       )}
 
                       {sending
-                        ? "Saving notification..."
+                        ? "Rejecting and notifying..."
                         : sent
-                          ? "Notification saved"
-                          : "Send notification"}
+                          ? "Rejection recorded"
+                          : "Reject report & notify resident"}
                     </button>
 
                     {/* SUCCESS */}
-                    {sent && (
-                      <div
-                        role="status"
-                        className="flex items-start gap-2 rounded-xl border border-[#CDE4CA] bg-[#F1F9EF] p-3 text-[12px] font-semibold text-[#36713B]"
-                      >
-                        <CheckCircle2
-                          size={18}
-                          className="shrink-0"
-                        />
 
-                        <span>
-                          The resident's in-app
-                          notification was saved.
-                        </span>
-                      </div>
+                    {sent && (
+                      <p
+                        role="status"
+                        className="rounded-xl border border-green-200 bg-green-50 p-3 text-xs font-semibold text-green-800"
+                      >
+                        Report rejected and the resident's
+                        in-app notification saved.
+                      </p>
                     )}
 
-                    {/* ERROR */}
+                    {/* ACTUAL SUPABASE ERROR */}
+
                     {sendError && (
                       <div
                         role="alert"
-                        className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-[12px] text-red-700"
+                        className="rounded-xl border border-red-200 bg-red-50 p-3"
                       >
-                        <AlertCircle
-                          size={18}
-                          className="shrink-0"
-                        />
+                        <p className="flex items-center gap-2 text-xs font-semibold text-red-700">
+                          <AlertCircle size={16} />
+                          Rejection could not be completed
+                        </p>
 
-                        <span className="break-words">
+                        <p className="mt-2 whitespace-pre-wrap break-words text-xs text-red-700">
                           {sendError}
-                        </span>
+                        </p>
                       </div>
                     )}
 
-                    {delayedOptions.length === 0 && (
-                      <p className="text-center text-[11px] leading-relaxed text-[#999]">
-                        The notification form will
-                        become available when a
-                        delayed collection is linked
-                        to a resident's report.
-                      </p>
-                    )}
+                    {/* NO REPORTS */}
+
+                    {reviewOptions.length === 0 &&
+                      !sent && (
+                        <p className="text-center text-[11px] text-[#999]">
+                          No reports are currently awaiting
+                          invalid-submission review.
+                        </p>
+                      )}
                   </div>
                 </div>
               </aside>

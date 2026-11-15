@@ -1,22 +1,14 @@
+
 import { useEffect, useRef, useState } from "react";
-import {
-  Bell,
-  Check,
-  Info,
-  Truck,
-} from "lucide-react";
+import { Bell, Check, XCircle } from "lucide-react";
 
 import { supabase } from "../../lib/supabase";
 
-type NotificationCategory = "Collection" | "Reminders";
-type Filter = "All" | NotificationCategory;
+// ==========================================
+// TYPES
+// ==========================================
 
-type NotificationKind =
-  | "completed"
-  | "overflow"
-  | "delayed"
-  | "reminder"
-  | "info";
+type NotificationKind = "rejected";
 
 type NotificationRow = {
   notification_id: string;
@@ -31,76 +23,54 @@ type NotificationRow = {
 type ResidentNotice = {
   id: string;
   kind: NotificationKind;
-  category: NotificationCategory;
   title: string;
   message: string;
   createdAt: string;
   read: boolean;
 };
 
-const filters: Filter[] = [
-  "All",
-  "Collection",
-  "Reminders",
-];
+// ==========================================
+// NOTIFICATION COLORS
+// ==========================================
 
-const appearance = {
-  completed: {
-    stripe: "bg-[#a6b879]",
-    title: "text-[#71863d]",
-    iconBackground: "bg-[#a4e4d6]",
-  },
-  overflow: {
-    stripe: "bg-[#ff1329]",
-    title: "text-[#ff0019]",
-    iconBackground: "bg-white",
-  },
-  delayed: {
-    stripe: "bg-[#ff1329]",
-    title: "text-[#ff0019]",
-    iconBackground: "bg-[#fff8cd]",
-  },
-  reminder: {
-    stripe: "bg-[#ff902a]",
-    title: "text-[#c9660b]",
-    iconBackground: "bg-[#fff5c9]",
-  },
-  info: {
-    stripe: "bg-[#a6b879]",
-    title: "text-[#71863d]",
-    iconBackground: "bg-[#edf2e2]",
+const appearance: Record<
+  NotificationKind,
+  {
+    stripe: string;
+    title: string;
+    iconBackground: string;
+  }
+> = {
+  rejected: {
+    stripe: "bg-[#e41e35]",
+    title: "text-[#c92438]",
+    iconBackground: "bg-red-100",
   },
 };
 
-// The current schema has notification_type but no icon/category
-// columns. These rules affect presentation only.
+// ==========================================
+// ONLY DISPLAY REJECTED NOTIFICATIONS
+// ==========================================
+
 function mapNotification(
   row: NotificationRow
-): ResidentNotice {
-  const title = row.title.toLowerCase();
+): ResidentNotice | null {
+  const type =
+    row.notification_type?.toLowerCase() ?? "";
 
-  let kind: NotificationKind = "info";
+  const title =
+    row.title?.toLowerCase() ?? "";
 
-  if (/remind/.test(title)) {
-    kind = "reminder";
-  } else if (/complet|resolved/.test(title)) {
-    kind = "completed";
-  } else if (/overflow|bin full|full bin/.test(title)) {
-    kind = "overflow";
-  } else if (/delay/.test(title)) {
-    kind = "delayed";
+  const searchable = `${type} ${title}`;
+
+  // Ignore all notification types except Rejected.
+  if (!/reject|declin/.test(searchable)) {
+    return null;
   }
-
-  const category: NotificationCategory =
-    kind === "reminder" ||
-    row.notification_type === "system"
-      ? "Reminders"
-      : "Collection";
 
   return {
     id: row.notification_id,
-    kind,
-    category,
+    kind: "rejected",
     title: row.title,
     message: row.message,
     createdAt: row.created_at,
@@ -108,7 +78,14 @@ function mapNotification(
   };
 }
 
-function relativeTime(value: string, now: number) {
+// ==========================================
+// FORMAT NOTIFICATION TIME
+// ==========================================
+
+function relativeTime(
+  value: string,
+  now: number
+): string {
   const timestamp = new Date(value).getTime();
 
   if (!Number.isFinite(timestamp)) {
@@ -120,74 +97,121 @@ function relativeTime(value: string, now: number) {
     Math.floor((now - timestamp) / 1000)
   );
 
-  if (seconds < 60) return "Just now";
-
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hr ago`;
-
-  const days = Math.floor(hours / 24);
-  if (days < 7) {
-    return `${days} ${days === 1 ? "day" : "days"} ago`;
+  if (seconds < 60) {
+    return "Just now";
   }
 
-  return new Date(value).toLocaleDateString("en-US", {
-    timeZone: "Asia/Manila",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  const minutes = Math.floor(seconds / 60);
+
+  if (minutes < 60) {
+    return `${minutes} min ago`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+
+  if (hours < 24) {
+    return `${hours} hr ago`;
+  }
+
+  const days = Math.floor(hours / 24);
+
+  if (days < 7) {
+    return `${days} ${
+      days === 1 ? "day" : "days"
+    } ago`;
+  }
+
+  return new Date(value).toLocaleDateString(
+    "en-US",
+    {
+      timeZone: "Asia/Manila",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }
+  );
 }
 
+// ==========================================
+// MAIN RESIDENT NOTIFICATION COMPONENT
+// ==========================================
+
 export default function ResidentNotification() {
-  const [activeFilter, setActiveFilter] =
-    useState<Filter>("All");
+  // ========================================
+  // STATES
+  // ========================================
 
   const [notifications, setNotifications] =
     useState<ResidentNotice[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
   const [error, setError] = useState("");
   const [saveError, setSaveError] = useState("");
+
   const [reloadKey, setReloadKey] = useState(0);
   const [now, setNow] = useState(Date.now());
+
+  // ========================================
+  // REFERENCES
+  // ========================================
 
   const userIdRef = useRef<string | null>(null);
   const generationRef = useRef(0);
   const savingRef = useRef(false);
 
-  // Update relative timestamps while the page remains open.
+  // ========================================
+  // UPDATE RELATIVE TIMESTAMPS
+  // ========================================
+
   useEffect(() => {
     const timer = window.setInterval(() => {
       setNow(Date.now());
     }, 60000);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+    };
   }, []);
 
-  // Reload when the signed-in account changes.
+  // ========================================
+  // DETECT AUTHENTICATION CHANGES
+  // ========================================
+
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event) => {
-      if (
-        event === "SIGNED_IN" ||
-        event === "SIGNED_OUT"
-      ) {
-        setReloadKey((value) => value + 1);
+    } = supabase.auth.onAuthStateChange(
+      (event) => {
+        if (
+          event === "SIGNED_IN" ||
+          event === "SIGNED_OUT"
+        ) {
+          setReloadKey(
+            (previous) => previous + 1
+          );
+        }
       }
-    });
+    );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
-  // Load only the current user's notifications.
+  // ========================================
+  // FETCH RESIDENT NOTIFICATIONS
+  // ========================================
+
   useEffect(() => {
     let active = true;
+
     const generation = ++generationRef.current;
+
+    let notificationChannel:
+      ReturnType<typeof supabase.channel> | null =
+      null;
 
     userIdRef.current = null;
     savingRef.current = false;
@@ -195,15 +219,28 @@ export default function ResidentNotification() {
     async function loadNotifications() {
       setLoading(true);
       setSaving(false);
+
       setError("");
       setSaveError("");
       setNotifications([]);
 
       try {
-        const { data: authData, error: authError } =
-          await supabase.auth.getUser();
+        // ==================================
+        // GET CURRENT USER
+        // ==================================
 
-        if (!active) return;
+        const {
+          data: authData,
+          error: authError,
+        } = await supabase.auth.getUser();
+
+        if (!active) {
+          return;
+        }
+
+        if (authError) {
+          throw authError;
+        }
 
         if (!authData.user) {
           throw new Error(
@@ -211,41 +248,57 @@ export default function ResidentNotification() {
           );
         }
 
-        if (authError) throw authError;
-
         const userId = authData.user.id;
+
         userIdRef.current = userId;
 
+        // ==================================
+        // LOAD NOTIFICATIONS FROM SUPABASE
+        // ==================================
+
         const rows: NotificationRow[] = [];
+
         const pageSize = 200;
         let offset = 0;
 
         while (active) {
-          const { data, error: queryError } =
-            await supabase
-              .from("notifications")
-              .select(`
-                notification_id,
-                user_id,
-                title,
-                message,
-                notification_type,
-                is_read,
-                created_at
-              `)
-              .eq("user_id", userId)
-              .order("created_at", {
-                ascending: false,
-              })
-              .order("notification_id")
-              .range(offset, offset + pageSize - 1);
+          const {
+            data,
+            error: queryError,
+          } = await supabase
+            .from("notifications")
+            .select(`
+              notification_id,
+              user_id,
+              title,
+              message,
+              notification_type,
+              is_read,
+              created_at
+            `)
+            .eq("user_id", userId)
+            .order("created_at", {
+              ascending: false,
+            })
+            .order("notification_id")
+            .range(
+              offset,
+              offset + pageSize - 1
+            );
 
-          if (queryError) throw queryError;
+          if (queryError) {
+            throw queryError;
+          }
 
-          const page = (data ?? []) as NotificationRow[];
+          const page =
+            (data ?? []) as NotificationRow[];
+
           rows.push(...page);
 
-          if (page.length < pageSize) break;
+          if (page.length < pageSize) {
+            break;
+          }
+
           offset += pageSize;
         }
 
@@ -256,8 +309,53 @@ export default function ResidentNotification() {
           return;
         }
 
-        setNotifications(rows.map(mapNotification));
+        // ==================================
+        // FILTER REJECTED NOTIFICATIONS ONLY
+        // ==================================
+
+        const rejectedNotifications = rows
+          .map(mapNotification)
+          .filter(
+            (
+              notification
+            ): notification is ResidentNotice =>
+              notification !== null
+          );
+
+        setNotifications(rejectedNotifications);
         setNow(Date.now());
+
+        // ==================================
+        // SUPABASE REALTIME
+        // ==================================
+
+        // Enable Realtime for the notifications
+        // table to receive new records.
+
+        notificationChannel = supabase
+          .channel(
+            `resident-notices-${userId}`
+          )
+          .on(
+            "postgres_changes",
+            {
+              event: "INSERT",
+              schema: "public",
+              table: "notifications",
+              filter: `user_id=eq.${userId}`,
+            },
+            () => {
+              if (
+                active &&
+                generation === generationRef.current
+              ) {
+                setReloadKey(
+                  (previous) => previous + 1
+                );
+              }
+            }
+          )
+          .subscribe();
       } catch (failure) {
         if (active) {
           setError(
@@ -267,21 +365,39 @@ export default function ResidentNotification() {
           );
         }
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     }
 
     void loadNotifications();
 
+    // ==================================
+    // CLEAN UP REALTIME CONNECTION
+    // ==================================
+
     return () => {
       active = false;
 
-      if (generationRef.current === generation) {
+      if (notificationChannel) {
+        void supabase.removeChannel(
+          notificationChannel
+        );
+      }
+
+      if (
+        generationRef.current === generation
+      ) {
         generationRef.current += 1;
         userIdRef.current = null;
       }
     };
   }, [reloadKey]);
+
+  // ========================================
+  // UPDATE READ STATUS IN SUPABASE
+  // ========================================
 
   async function saveRead(ids: string[]) {
     const userId = userIdRef.current;
@@ -301,47 +417,84 @@ export default function ResidentNotification() {
     setSaveError("");
 
     try {
-      // Keep bulk requests reasonably sized.
-      for (let index = 0; index < ids.length; index += 200) {
-        if (generation !== generationRef.current) return;
+      for (
+        let index = 0;
+        index < ids.length;
+        index += 200
+      ) {
+        if (
+          generation !== generationRef.current
+        ) {
+          return;
+        }
 
-        const batch = ids.slice(index, index + 200);
+        const batch = ids.slice(
+          index,
+          index + 200
+        );
 
-        const { data, error: updateError } =
-          await supabase
-            .from("notifications")
-            .update({ is_read: true })
-            .eq("user_id", userId)
-            .in("notification_id", batch)
-            .select("notification_id");
+        // ==================================
+        // SAVE TO SUPABASE
+        // ==================================
 
-        if (generation !== generationRef.current) return;
+        const {
+          data,
+          error: updateError,
+        } = await supabase
+          .from("notifications")
+          .update({
+            is_read: true,
+          })
+          .eq("user_id", userId)
+          .in("notification_id", batch)
+          .select("notification_id");
 
-        if (updateError) throw updateError;
+        if (
+          generation !== generationRef.current
+        ) {
+          return;
+        }
+
+        if (updateError) {
+          throw updateError;
+        }
 
         const updatedIds = new Set(
           (data ?? []).map(
-            (row) => row.notification_id as string
+            (row) =>
+              row.notification_id as string
           )
         );
 
-        // Change the UI only for rows confirmed by Supabase.
+        // ==================================
+        // UPDATE UI AFTER SUCCESS
+        // ==================================
+
         setNotifications((current) =>
           current.map((notification) =>
             updatedIds.has(notification.id)
-              ? { ...notification, read: true }
+              ? {
+                  ...notification,
+                  read: true,
+                }
               : notification
           )
         );
 
-        if (updatedIds.size !== batch.length) {
+        if (
+          updatedIds.size !== batch.length
+        ) {
           throw new Error(
             "Some notifications could not be marked as read. Check your notification update policy."
           );
         }
       }
     } catch (failure) {
-      if (generation !== generationRef.current) return;
+      if (
+        generation !== generationRef.current
+      ) {
+        return;
+      }
 
       setSaveError(
         failure instanceof Error
@@ -349,12 +502,18 @@ export default function ResidentNotification() {
           : "Unable to update notifications."
       );
     } finally {
-      if (generation === generationRef.current) {
+      if (
+        generation === generationRef.current
+      ) {
         savingRef.current = false;
         setSaving(false);
       }
     }
   }
+
+  // ========================================
+  // MARK ALL REJECTED NOTIFICATIONS READ
+  // ========================================
 
   function markAllRead() {
     const unreadIds = notifications
@@ -364,34 +523,53 @@ export default function ResidentNotification() {
     void saveRead(unreadIds);
   }
 
+  // ========================================
+  // MARK SINGLE NOTIFICATION READ
+  // ========================================
+
   function markRead(id: string) {
     const notification = notifications.find(
       (item) => item.id === id
     );
 
-    if (!notification || notification.read) return;
+    if (
+      !notification ||
+      notification.read
+    ) {
+      return;
+    }
 
     void saveRead([id]);
   }
 
-  const visibleNotifications = notifications.filter(
-    (notification) =>
-      activeFilter === "All" ||
-      notification.category === activeFilter
-  );
+  // ========================================
+  // CHECK UNREAD NOTIFICATIONS
+  // ========================================
 
   const hasUnread = notifications.some(
     (notification) => !notification.read
   );
 
+  // ========================================
+  // USER INTERFACE
+  // ========================================
+
   return (
     <main className="flex h-[calc(100dvh-5rem)] min-h-0 flex-col overflow-hidden bg-white">
       <div className="mx-auto flex min-h-0 w-full max-w-[430px] flex-1 flex-col px-3 pt-7 sm:max-w-xl sm:px-5 sm:pt-9 lg:max-w-3xl">
+
+        {/* ====================================
+            NOTIFICATION TITLE
+        ==================================== */}
+
         <h1 className="shrink-0 text-base font-bold text-black sm:text-xl">
           Notifications
         </h1>
 
-        {/* Red information banner */}
+        {/* ====================================
+            RED INFORMATION BANNER
+        ==================================== */}
+
         <section className="mt-3 flex shrink-0 items-center gap-3 rounded-lg bg-[#c90000] px-3 py-3 text-white sm:px-4">
           <div
             aria-hidden="true"
@@ -408,11 +586,16 @@ export default function ResidentNotification() {
             <h2 className="text-xs font-bold">
               Stay updated, stay informed.
             </h2>
+
             <p className="mt-1 text-[11px]">
-              Here are the latest updates and alerts.
+              Only rejected waste reports are shown.
             </p>
           </div>
         </section>
+
+        {/* ====================================
+            MARK ALL READ
+        ==================================== */}
 
         <div className="flex shrink-0 justify-end">
           <button
@@ -434,28 +617,14 @@ export default function ResidentNotification() {
           </button>
         </div>
 
-        {/* Category filters */}
-        <div
-          role="group"
-          aria-label="Filter notifications"
-          className="mb-3 flex shrink-0 flex-wrap items-center justify-center gap-4 sm:gap-6"
-        >
-          {filters.map((filter) => (
-            <button
-              key={filter}
-              type="button"
-              aria-pressed={activeFilter === filter}
-              onClick={() => setActiveFilter(filter)}
-              className={`min-h-8 rounded-full border border-[#a6b879] px-3 py-1 text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#82964e] sm:px-4 ${
-                activeFilter === filter
-                  ? "bg-[#a6b879] text-white"
-                  : "bg-white text-neutral-600 hover:bg-[#f2f5e9]"
-              }`}
-            >
-              {filter}
-            </button>
-          ))}
-        </div>
+        {/* ====================================
+            ALL AND REJECTED FILTERS REMOVED
+            NOTIFICATIONS DISPLAY DIRECTLY
+        ==================================== */}
+
+        {/* ====================================
+            SAVE ERROR
+        ==================================== */}
 
         {saveError && (
           <p
@@ -466,7 +635,10 @@ export default function ResidentNotification() {
           </p>
         )}
 
-        {/* Only the notification list scrolls */}
+        {/* ====================================
+            NOTIFICATION LIST
+        ==================================== */}
+
         <div
           role="region"
           aria-label="Notifications"
@@ -474,6 +646,10 @@ export default function ResidentNotification() {
           tabIndex={0}
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-6"
         >
+          {/* ====================================
+              LOADING
+          ==================================== */}
+
           {loading ? (
             <p
               role="status"
@@ -482,6 +658,11 @@ export default function ResidentNotification() {
               Loading notifications...
             </p>
           ) : error ? (
+
+            // ====================================
+            // ERROR STATE
+            // ====================================
+
             <div
               role="alert"
               className="rounded-xl border border-red-200 bg-red-50 p-4"
@@ -493,22 +674,32 @@ export default function ResidentNotification() {
               <button
                 type="button"
                 onClick={() =>
-                  setReloadKey((value) => value + 1)
+                  setReloadKey(
+                    (previous) => previous + 1
+                  )
                 }
                 className="mt-3 min-h-9 text-xs font-semibold text-red-700"
               >
                 Try Again
               </button>
             </div>
-          ) : visibleNotifications.length === 0 ? (
+          ) : notifications.length === 0 ? (
+
+            // ====================================
+            // EMPTY NOTIFICATIONS
+            // ====================================
+
             <p className="py-8 text-center text-sm text-neutral-500">
-              {notifications.length === 0
-                ? "You have no notifications yet."
-                : "No notifications in this category."}
+              No rejected report notifications yet.
             </p>
           ) : (
+
+            // ====================================
+            // REJECTED NOTIFICATION CARDS
+            // ====================================
+
             <ul className="space-y-5 sm:space-y-6">
-              {visibleNotifications.map((notification) => {
+              {notifications.map((notification) => {
                 const style =
                   appearance[notification.kind];
 
@@ -526,29 +717,48 @@ export default function ResidentNotification() {
                       }
                       disabled={saving}
                       aria-label={`${notification.title}, ${time}, ${
-                        notification.read ? "read" : "unread"
+                        notification.read
+                          ? "read"
+                          : "unread"
                       }`}
                       className="relative flex min-h-[82px] w-full overflow-hidden rounded-[15px] border border-[#c9c9c9] bg-white text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-wait sm:min-h-[94px]"
                     >
+                      {/* ====================================
+                          RED STRIPE
+                      ==================================== */}
+
                       <span
                         aria-hidden="true"
                         className={`absolute inset-y-0 left-0 w-[10px] ${style.stripe}`}
                       />
 
                       <div className="flex w-full items-start gap-2.5 py-3 pl-6 pr-3 sm:gap-3 sm:pl-7">
+
+                        {/* ====================================
+                            REJECTED ICON
+                        ==================================== */}
+
                         <div
                           aria-hidden="true"
                           className={`grid h-6 w-6 shrink-0 place-items-center rounded-full ${style.iconBackground}`}
                         >
-                          <NoticeIcon
-                            kind={notification.kind}
+                          <XCircle
+                            size={18}
+                            className="text-[#d21d35]"
                           />
                         </div>
 
                         <div className="min-w-0 flex-1">
+
+                          {/* ====================================
+                              TIME AND READ STATUS
+                          ==================================== */}
+
                           <div className="mb-1 flex items-center justify-end gap-2">
                             <time
-                              dateTime={notification.createdAt}
+                              dateTime={
+                                notification.createdAt
+                              }
                               className="text-[10px] text-[#8b7e7e]"
                             >
                               {time}
@@ -568,11 +778,19 @@ export default function ResidentNotification() {
                             )}
                           </div>
 
+                          {/* ====================================
+                              NOTIFICATION TITLE
+                          ==================================== */}
+
                           <h2
                             className={`break-words text-xs font-semibold leading-tight sm:text-sm ${style.title}`}
                           >
                             {notification.title}
                           </h2>
+
+                          {/* ====================================
+                              NOTIFICATION MESSAGE
+                          ==================================== */}
 
                           <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-snug text-[#737373]">
                             {notification.message}
@@ -588,63 +806,5 @@ export default function ResidentNotification() {
         </div>
       </div>
     </main>
-  );
-}
-
-function NoticeIcon({
-  kind,
-}: {
-  kind: NotificationKind;
-}) {
-  if (kind === "completed") {
-    return (
-      <Truck size={17} className="text-[#13ad91]" />
-    );
-  }
-
-  if (kind === "overflow") {
-    return (
-      <span className="h-4 w-4 rounded-full bg-[#ff1329]" />
-    );
-  }
-
-  if (kind === "delayed") {
-    return (
-      <svg
-        width="21"
-        height="21"
-        viewBox="0 0 24 24"
-        fill="none"
-      >
-        <path
-          d="M10.3 3.8a2 2 0 0 1 3.4 0l8.1 14A2 2 0 0 1 20.1 21H3.9a2 2 0 0 1-1.7-3.2l8.1-14Z"
-          fill="#ff2638"
-        />
-        <path
-          d="M12 8v6"
-          stroke="white"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        <circle
-          cx="12"
-          cy="17"
-          r="1"
-          fill="white"
-        />
-      </svg>
-    );
-  }
-
-  if (kind === "reminder") {
-    return (
-      <span className="grid h-5 w-5 place-items-center rounded-md bg-[#ff942c] text-base font-bold leading-none text-white">
-        !
-      </span>
-    );
-  }
-
-  return (
-    <Info size={17} className="text-[#71863d]" />
   );
 }

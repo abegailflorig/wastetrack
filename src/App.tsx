@@ -42,6 +42,7 @@ import WasteStatusDetails from "./pages/admin/WasteStatusDetails";
 import RegisterDisposalSite from "./pages/admin/RegisterDisposalSite";
 import EditCollectorAccount from "./pages/admin/EditCollectorAccount";
 import CollectorsAccount from "./pages/admin/CollectorsAccount";
+import RegisteredSiteQR from "./components/RegisteredSiteQR";
 
 /* Waste collector pages */
 import CollectorDashboard from "./pages/collectors/CollectorDashboard";
