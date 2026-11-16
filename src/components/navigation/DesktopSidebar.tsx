@@ -12,9 +12,7 @@ import {
 } from "react-router";
 
 import {
-  AlertCircle,
   BarChart3,
-  Bell,
   CalendarDays,
   FileText,
   Image as ImageIcon,
@@ -43,7 +41,6 @@ type UserProfile = {
   full_name: string | null;
   email: string | null;
   role: string;
-  profile_image: string | null;
   is_active: boolean | null;
 };
 
@@ -83,22 +80,11 @@ const ITEMS: SidebarItem[] = [
     icon: CalendarDays,
   },
   {
-    label: "Alerts",
-    to: "/admin/alerts",
-    icon: Bell,
-  },
-  {
     label: "Reports",
     to: "/admin/reports",
     icon: FileText,
   },
 ];
-
-// ========================================
-// SUPABASE STORAGE
-// ========================================
-
-const AVATAR_BUCKET = "account-avatars";
 
 // ========================================
 // ROLE LABEL
@@ -147,82 +133,6 @@ function getInitials(name: string): string {
 }
 
 // ========================================
-// SUPABASE ERROR MESSAGE
-// ========================================
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error
-  ) {
-    return String(
-      (error as { message: unknown }).message
-    );
-  }
-
-  return "Unable to load account information.";
-}
-
-// ========================================
-// LOAD PROFILE PHOTO FROM SUPABASE
-// ========================================
-
-async function getProfileImageUrl(
-  imagePath: string | null
-): Promise<string> {
-  if (!imagePath) {
-    return "";
-  }
-
-  const trimmedPath = imagePath.trim();
-
-  if (!trimmedPath) {
-    return "";
-  }
-
-  // If profile_image already contains
-  // a full URL, use it directly.
-  if (/^https?:\/\//i.test(trimmedPath)) {
-    return trimmedPath;
-  }
-
-  // Support paths saved as:
-  // user-id/photo.jpg
-  // account-avatars/user-id/photo.jpg
-
-  const cleanPath = trimmedPath.startsWith(
-    `${AVATAR_BUCKET}/`
-  )
-    ? trimmedPath.slice(
-        AVATAR_BUCKET.length + 1
-      )
-    : trimmedPath;
-
-  const {
-    data,
-    error,
-  } = await supabase.storage
-    .from(AVATAR_BUCKET)
-    .createSignedUrl(cleanPath, 3600);
-
-  if (error) {
-    console.warn(
-      "[WasteTrack] Sidebar profile image:",
-      error.message
-    );
-
-    return "";
-  }
-
-  return data?.signedUrl ?? "";
-}
-
-// ========================================
 // MAIN SIDEBAR COMPONENT
 // ========================================
 
@@ -239,14 +149,8 @@ export default function DesktopSidebar() {
   const [userId, setUserId] =
     useState<string | null>(null);
 
-  const [profileImageUrl, setProfileImageUrl] =
-    useState("");
-
   const [loading, setLoading] =
     useState(true);
-
-  const [error, setError] =
-    useState("");
 
   const requestRef = useRef(0);
 
@@ -258,8 +162,6 @@ export default function DesktopSidebar() {
     async () => {
       const requestId =
         ++requestRef.current;
-
-      setError("");
 
       try {
         // ==================================
@@ -293,7 +195,7 @@ export default function DesktopSidebar() {
         } = await supabase
           .from("users")
           .select(
-            "user_id,full_name,email,role,profile_image,is_active"
+            "user_id,full_name,email,role,is_active"
           )
           .eq("user_id", authUser.id)
           .maybeSingle();
@@ -310,15 +212,6 @@ export default function DesktopSidebar() {
 
         const account = userData as UserProfile;
 
-        // ==================================
-        // 3. FETCH PROFILE IMAGE
-        // ==================================
-
-        const imageUrl =
-          await getProfileImageUrl(
-            account.profile_image
-          );
-
         if (
           requestId !== requestRef.current
         ) {
@@ -326,13 +219,11 @@ export default function DesktopSidebar() {
         }
 
         // ==================================
-        // 4. UPDATE SIDEBAR STATES
+        // 3. UPDATE SIDEBAR STATES
         // ==================================
 
         setProfile(account);
         setUserId(authUser.id);
-        setProfileImageUrl(imageUrl);
-        setError("");
       } catch (cause) {
         if (
           requestId !== requestRef.current
@@ -347,11 +238,6 @@ export default function DesktopSidebar() {
 
         setProfile(null);
         setUserId(null);
-        setProfileImageUrl("");
-
-        setError(
-          getErrorMessage(cause)
-        );
       } finally {
         if (
           requestId === requestRef.current
@@ -383,8 +269,6 @@ export default function DesktopSidebar() {
 
           setProfile(null);
           setUserId(null);
-          setProfileImageUrl("");
-          setError("");
           setLoading(false);
 
           return;
@@ -680,7 +564,7 @@ export default function DesktopSidebar() {
             px-2.5 py-3
           "
         >
-          {/* PROFILE IMAGE */}
+          {/* ADMIN INITIALS */}
 
           <div
             className="
@@ -700,22 +584,8 @@ export default function DesktopSidebar() {
                 size={19}
                 className="animate-spin"
               />
-            ) : profileImageUrl ? (
-              <img
-                src={profileImageUrl}
-                alt="Administrator profile"
-                className="
-                  h-full w-full
-                  object-cover
-                "
-                onError={() =>
-                  setProfileImageUrl("")
-                }
-              />
             ) : (
-              <span>
-                {getInitials(displayName)}
-              </span>
+              <span>{getInitials(displayName)}</span>
             )}
           </div>
 
@@ -746,35 +616,6 @@ export default function DesktopSidebar() {
             </p>
           </div>
         </div>
-
-        {/* ==================================
-            ERROR MESSAGE
-        ================================== */}
-
-        {error && (
-          <div
-            role="alert"
-            title={error}
-            className="
-              mt-2
-              flex items-start
-              gap-2
-              px-2
-              text-[10px]
-              leading-relaxed
-              text-[#FFE1E1]
-            "
-          >
-            <AlertCircle
-              size={14}
-              className="mt-0.5 shrink-0"
-            />
-
-            <p>
-              Account information could not be loaded.
-            </p>
-          </div>
-        )}
       </div>
     </aside>
   );

@@ -29,14 +29,12 @@ import Capture from "./pages/resident/Capture";
 
 /* Barangay staff pages */
 import AdminDashboard from "./pages/admin/AdminDashboard";
-import ManageResidents from "./pages/admin/ManageResidents";
 import ManageCollectors from "./pages/admin/ManageCollectors";
 import AdminReviewReport from "./pages/admin/AdminReviewReport";
 import ManageSchedules from "./pages/admin/ManageSchedules";
 import ManageWasteStatus from "./pages/admin/ManageWasteStatus";
 import DisposalSites from "./pages/admin/DisposalSites";
 import UploadedImages from "./pages/admin/UploadedImages";
-import Alerts from "./pages/admin/Alerts";
 import ManageAccount from "./pages/admin/ManageAccount";
 import WasteStatusDetails from "./pages/admin/WasteStatusDetails";
 import RegisterDisposalSite from "./pages/admin/RegisterDisposalSite";
@@ -59,6 +57,8 @@ import CalendarList from "./pages/shared/CalendarList";
 import ScheduleDetails from "./pages/shared/ScheduleDetails";
 import Profile from "./pages/shared/Profile";
 
+/* Auth page */
+import ResetPassword from "./pages/auth/ResetPassword";
 
 export default function App() {
   return (
@@ -186,11 +186,6 @@ export default function App() {
         />
 
         <Route
-          path="/admin/residents"
-          element={<ManageResidents />}
-        />
-
-        <Route
           path="/admin/collectors"
           element={<ManageCollectors />}
         />
@@ -226,9 +221,6 @@ export default function App() {
 
         <Route path="/admin/uploaded-images" 
         element={<UploadedImages />} />
-
-        <Route path="/admin/alerts" 
-        element={<Alerts />} />
 
         <Route path="/admin/account" 
         element={<ManageAccount />} />
@@ -310,6 +302,13 @@ export default function App() {
         path="/collector/profile" 
         element={<Profile />} 
       />
+      <Route
+  path="/reset-password"
+  element={<ResetPassword />}
+/>
+
     </Routes>
+
+      
   );
 }
