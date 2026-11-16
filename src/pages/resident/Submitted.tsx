@@ -9,12 +9,7 @@ import {
   FileText,
 } from "lucide-react";
 
-import {
-  Link,
-  useLocation,
-} from "react-router";
-
-// Adjust this path to your Supabase client.
+import { Link, useLocation } from "react-router";
 import { supabase } from "../../lib/supabase";
 
 // ==========================================
@@ -40,7 +35,6 @@ type WasteReport = {
   date_uploaded: string;
   address: string | null;
   site_description: string | null;
-  waste_type: string;
   cnn_detection_level: string | null;
 };
 
@@ -55,20 +49,15 @@ type SubmittedDetails = {
 // FORMAT DATE
 // ==========================================
 
-function formatDate(value?: string | null) {
-  if (!value) {
-    return "Not scheduled yet";
-  }
+function formatDate(value?: string | null): string {
+  if (!value) return "Not scheduled yet";
 
-  // Format date-only database values without
-  // changing their calendar date.
-  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-  const match = value.match(dateOnly);
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})$/
+  );
 
   if (match) {
     const [, year, month, day] = match;
-
     return `${Number(month)}-${Number(day)}-${year}`;
   }
 
@@ -78,7 +67,6 @@ function formatDate(value?: string | null) {
     return "Not available";
   }
 
-  // Philippine timezone.
   return date
     .toLocaleDateString("en-US", {
       timeZone: "Asia/Manila",
@@ -90,115 +78,88 @@ function formatDate(value?: string | null) {
 }
 
 // ==========================================
-// FORMAT CNN RESULT
+// CNN RESULT
 // ==========================================
 
-function formatCNNResult(value: string | null) {
+function formatCNNResult(value: string | null): string {
   switch (value) {
     case "EMPTY":
       return "Empty";
-
     case "NEAR FULL":
       return "Near Full";
-
     case "FULL":
       return "Full";
-
     default:
       return "Not available";
   }
 }
 
-// ==========================================
-// CNN BADGE COLORS
-// ==========================================
-
-function getCNNStyle(value: string | null) {
+function getCNNStyle(value: string | null): string {
   switch (value) {
     case "EMPTY":
       return "bg-[#DFEDCB] text-[#283C19]";
-
     case "NEAR FULL":
       return "bg-[#F6E4B4] text-[#29241B]";
-
     case "FULL":
       return "bg-[#F6CECE] text-[#7F2020]";
-
     default:
       return "bg-gray-100 text-gray-700";
   }
 }
 
-function getCNNDotStyle(value: string | null) {
+function getCNNDotStyle(value: string | null): string {
   switch (value) {
     case "EMPTY":
       return "bg-green-500";
-
     case "NEAR FULL":
       return "bg-amber-500";
-
     case "FULL":
       return "bg-red-500";
-
     default:
       return "bg-gray-400";
   }
 }
 
 // ==========================================
-// FORMAT STATUS
+// REPORT STATUS
 // ==========================================
 
-function formatStatus(value: string) {
+function formatStatus(value: string): string {
   switch (value) {
     case "Pending":
       return "Under Review";
-
     case "Accepted":
       return "Accepted";
-
     case "Rejected":
       return "Rejected";
-
     case "Scheduled":
       return "Scheduled";
-
     case "Resolved":
       return "Resolved";
-
     default:
       return value;
   }
 }
 
-// ==========================================
-// STATUS BADGE COLORS
-// ==========================================
-
-function getStatusStyle(value: string) {
+function getStatusStyle(value: string): string {
   switch (value) {
     case "Pending":
       return "bg-[#EDE1CC] text-[#342C20]";
-
     case "Accepted":
       return "bg-blue-100 text-blue-800";
-
     case "Rejected":
       return "bg-red-100 text-red-800";
-
     case "Scheduled":
       return "bg-indigo-100 text-indigo-800";
-
     case "Resolved":
       return "bg-green-100 text-green-800";
-
     default:
       return "bg-gray-100 text-gray-700";
   }
 }
 
 // ==========================================
-// DETAILS TABLE ROW
+// RESPONSIVE DETAILS ROW
 // ==========================================
 
 function Row({
@@ -211,21 +172,21 @@ function Row({
   return (
     <div
       className="
-        flex min-h-[36px]
-        items-center justify-between
-        gap-3 border-b
-        border-[#D8D8D8]
-        px-3 py-1.5
+        flex min-h-[56px] w-full
+        flex-wrap items-center justify-between
+        gap-x-3 gap-y-2
+        border-b border-[#D8D8D8]
+        px-4 py-3
+        sm:min-h-[60px] sm:px-5
         last:border-b-0
       "
     >
       <span
         className="
-          shrink-0
-          text-[11px]
-          font-normal
-          text-[#858585]
-          sm:text-xs
+          min-w-0 flex-1
+          text-[14px] font-medium
+          leading-relaxed text-[#555555]
+          sm:text-[15px]
         "
       >
         {label}
@@ -233,10 +194,11 @@ function Row({
 
       <span
         className="
-          min-w-0 break-words
-          text-right text-[11px]
-          font-bold text-black
-          sm:text-xs
+          min-w-0 max-w-full
+          break-words text-right
+          text-[14px] font-bold
+          leading-relaxed text-black
+          sm:text-[15px]
         "
       >
         {value}
@@ -246,7 +208,72 @@ function Row({
 }
 
 // ==========================================
-// MAIN SUBMITTED COMPONENT
+// RESPONSIVE BADGE ROW
+// ==========================================
+
+function BadgeRow({
+  label,
+  value,
+  badgeClass,
+  dotClass,
+}: {
+  label: string;
+  value: string;
+  badgeClass: string;
+  dotClass?: string;
+}) {
+  return (
+    <div
+      className="
+        flex min-h-[56px] w-full
+        flex-wrap items-center justify-between
+        gap-x-3 gap-y-2
+        border-b border-[#D8D8D8]
+        px-4 py-3
+        sm:min-h-[60px] sm:px-5
+      "
+    >
+      <span
+        className="
+          min-w-0 flex-1
+          text-[14px] font-medium
+          leading-relaxed text-[#555555]
+          sm:text-[15px]
+        "
+      >
+        {label}
+      </span>
+
+      <span
+        className={`
+          inline-flex max-w-full
+          items-center justify-center
+          gap-2 rounded-full
+          px-3 py-2
+          text-center text-[13px]
+          font-bold leading-snug
+          sm:text-[14px]
+          ${badgeClass}
+        `}
+      >
+        {dotClass && (
+          <span
+            className={`
+              h-[9px] w-[9px]
+              shrink-0 rounded-full
+              ${dotClass}
+            `}
+          />
+        )}
+
+        <span className="break-words">{value}</span>
+      </span>
+    </div>
+  );
+}
+
+// ==========================================
+// MAIN COMPONENT
 // ==========================================
 
 export default function Submitted() {
@@ -255,7 +282,6 @@ export default function Submitted() {
   const state =
     location.state as SubmittedState | null;
 
-  // Get report ID from URL or React navigation state.
   const queryParams = new URLSearchParams(
     location.search
   );
@@ -265,19 +291,14 @@ export default function Submitted() {
     state?.reportId ||
     null;
 
-  // ========================================
-  // COMPONENT STATES
-  // ========================================
-
   const [loading, setLoading] = useState(true);
-
   const [error, setError] = useState("");
 
   const [details, setDetails] =
     useState<SubmittedDetails | null>(null);
 
   // ========================================
-  // FETCH REPORT FROM SUPABASE
+  // FETCH DATA FROM SUPABASE
   // ========================================
 
   useEffect(() => {
@@ -292,22 +313,19 @@ export default function Submitted() {
         setError(
           "Report ID not found. Please open your report from My Reports."
         );
-
         setLoading(false);
         return;
       }
 
       try {
-        // STEP 1: GET CURRENT USER
+        // STEP 1: AUTHENTICATED USER
 
         const {
           data: { user },
           error: authError,
         } = await supabase.auth.getUser();
 
-        if (authError) {
-          throw authError;
-        }
+        if (authError) throw authError;
 
         if (!user) {
           throw new Error(
@@ -315,7 +333,7 @@ export default function Submitted() {
           );
         }
 
-        // STEP 2: FETCH WASTE REPORT
+        // STEP 2: WASTE REPORT
 
         const {
           data: reportData,
@@ -329,16 +347,13 @@ export default function Submitted() {
             date_uploaded,
             address,
             site_description,
-            waste_type,
             cnn_detection_level
           `)
           .eq("report_id", reportId)
           .eq("user_id", user.id)
           .maybeSingle();
 
-        if (reportError) {
-          throw reportError;
-        }
+        if (reportError) throw reportError;
 
         if (!reportData) {
           throw new Error(
@@ -348,7 +363,7 @@ export default function Submitted() {
 
         const report = reportData as WasteReport;
 
-        // STEP 3: FETCH LATEST STATUS
+        // STEP 3: LATEST STATUS
 
         const {
           data: statusData,
@@ -363,14 +378,12 @@ export default function Submitted() {
           .limit(1)
           .maybeSingle();
 
-        if (statusError) {
-          throw statusError;
-        }
+        if (statusError) throw statusError;
 
         const reportStatus =
           statusData?.status || "Unavailable";
 
-        // STEP 4: GET COLLECTION LOCATION
+        // STEP 4: DISPOSAL SITE
 
         let siteName =
           report.site_description ||
@@ -399,7 +412,7 @@ export default function Submitted() {
           }
         }
 
-        // STEP 5: GET COLLECTION DATE
+        // STEP 5: COLLECTION SCHEDULE
 
         let collectionDate: string | null = null;
 
@@ -408,7 +421,7 @@ export default function Submitted() {
           error: scheduleError,
         } = await supabase
           .from("schedules")
-          .select("date, status")
+          .select("date, status, created_at")
           .eq("source_report_id", reportId)
           .neq("status", "Cancelled")
           .order("created_at", {
@@ -428,7 +441,7 @@ export default function Submitted() {
           collectionDate = scheduleData.date;
         }
 
-        // STEP 6: SAVE FETCHED DATA
+        // STEP 6: UPDATE COMPONENT
 
         if (!active) return;
 
@@ -457,9 +470,7 @@ export default function Submitted() {
           );
         }
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     }
 
@@ -478,15 +489,14 @@ export default function Submitted() {
     return (
       <main
         className="
-          flex min-h-[100dvh]
-          w-full items-center
-          justify-center bg-[#F2E6D2]
-          px-5
+          flex min-h-dvh w-full
+          items-center justify-center
+          bg-[#F2E6D2] px-5
         "
       >
         <div className="text-center">
           <LoaderCircle
-            size={45}
+            size={48}
             className="
               mx-auto animate-spin
               text-[#9CA874]
@@ -495,8 +505,9 @@ export default function Submitted() {
 
           <p
             className="
-              mt-4 text-xs
+              mt-5 text-[15px]
               font-semibold text-black
+              sm:text-[16px]
             "
           >
             Loading report details...
@@ -514,21 +525,23 @@ export default function Submitted() {
     return (
       <main
         className="
-          flex min-h-[100dvh]
-          w-full flex-col
-          items-center justify-center
-          bg-[#F2E6D2] px-5
+          flex min-h-dvh w-full
+          flex-col items-center
+          justify-center
+          bg-[#F2E6D2]
+          px-5 py-10
         "
       >
         <FileText
-          size={45}
+          size={48}
           className="text-red-600"
         />
 
         <h1
           className="
-            mt-4 text-lg
-            font-bold text-black
+            mt-5 text-center
+            text-[22px] font-bold
+            text-black sm:text-[24px]
           "
         >
           Unable to load report
@@ -537,9 +550,10 @@ export default function Submitted() {
         <p
           role="alert"
           className="
-            mt-2 max-w-xs
-            text-center text-xs
-            text-neutral-500
+            mt-3 max-w-[380px]
+            break-words text-center
+            text-[15px] leading-7
+            text-[#555555]
           "
         >
           {error ||
@@ -549,10 +563,14 @@ export default function Submitted() {
         <Link
           to={REPORTS_ROUTE}
           className="
-            mt-6 rounded-lg
-            bg-red-600 px-6
-            py-3 text-xs
-            font-bold text-white
+            mt-7 inline-flex
+            min-h-[48px]
+            items-center justify-center
+            rounded-lg bg-red-600
+            px-6 py-3
+            text-[15px] font-bold
+            text-white
+            hover:bg-red-700
           "
         >
           View My Reports
@@ -583,133 +601,136 @@ export default function Submitted() {
   return (
     <main
       className="
-        min-h-[100dvh]
-        w-full bg-[#F2E6D2]
-        px-[18px] pb-16
-        pt-14 text-black
+        min-h-dvh w-full
+        overflow-x-hidden
+        bg-[#F2E6D2]
+        px-4 pb-12 pt-6
+        text-black
+        sm:px-6 sm:pt-10
+        md:pb-16
       "
     >
       <div
         className="
           mx-auto w-full
           max-w-[440px]
+          sm:max-w-[500px]
         "
       >
-        {/* ================================= */}
         {/* CLOSE BUTTON */}
-        {/* ================================= */}
 
-        <div className="flex justify-end pr-1">
+        <div className="flex justify-end">
           <Link
             to={DASHBOARD_ROUTE}
             aria-label="Close"
             className="
-              inline-flex h-7 w-7
+              inline-flex h-11 w-11
               items-center justify-center
+              rounded-full
               text-black
+              transition-colors
+              hover:bg-black/5
             "
           >
             <X
-              size={24}
-              strokeWidth={2.7}
+              size={27}
+              strokeWidth={2.5}
             />
           </Link>
         </div>
 
-        {/* ================================= */}
         {/* SUCCESS MESSAGE */}
-        {/* ================================= */}
 
         <section
           className="
-            mt-16 flex flex-col
+            mt-8 flex flex-col
             items-center text-center
+            sm:mt-12
           "
         >
-          {/* GREEN CHECK CIRCLE */}
+          {/* CHECK CIRCLE */}
+
           <div
             className="
-              flex h-[88px] w-[88px]
+              flex h-[92px] w-[92px]
               items-center justify-center
               rounded-full bg-[#D6D9AB]
+              sm:h-[100px] sm:w-[100px]
             "
           >
             <Check
-              size={61}
+              size={62}
               strokeWidth={2.2}
               className="text-black"
             />
           </div>
 
-          {/* SUCCESS TITLE */}
+          {/* TITLE */}
+
           <h1
             className="
-              mt-10 text-[21px]
-              font-bold leading-tight
-              text-black
+              mt-8 text-center
+              text-[24px] font-bold
+              leading-tight text-black
+              sm:text-[28px]
             "
           >
             Report submitted
           </h1>
 
-          {/* SUCCESS DESCRIPTION */}
+          {/* DESCRIPTION */}
+
           <p
             className="
-              mx-auto mt-3
-              max-w-[335px]
-              text-[12px]
-              leading-[1.45]
-              text-[#85837D]
+              mx-auto mt-4
+              max-w-[380px]
+              px-2 text-center
+              text-[15px] leading-7
+              text-[#555555]
+              sm:text-[16px]
             "
           >
             Your report on{" "}
-            <span>
+            <span className="font-semibold text-black">
               {siteName}
             </span>{" "}
             is now with barangay staff.
-            You can track its status anytime from{" "}
-            <Link
-              to={REPORTS_ROUTE}
-              className="text-inherit"
-            >
-              My Reports.
-            </Link>
+            You can track its status anytime from My Reports.
+            
           </p>
         </section>
 
-        {/* ================================= */}
         {/* DETAILS CARD */}
-        {/* ================================= */}
 
         <section
           className="
-            mt-12 w-full
+            mt-10 w-full
             rounded-[20px]
             border border-[#E1D3C1]
             bg-[#ECE0CF]
-            p-[10px]
-            shadow-[0_2px_3px_rgba(0,0,0,0.08)]
+            p-3 shadow-sm
+            sm:mt-12 sm:p-5
           "
         >
           {/* DETAILS HEADER */}
+
           <div
             className="
               flex items-center
-              gap-1.5 px-1.5
-              pb-[9px]
+              gap-2 px-2 pb-3
             "
           >
             <ClipboardList
-              size={17}
+              size={21}
               strokeWidth={2.3}
-              className="text-black"
+              className="shrink-0 text-black"
             />
 
             <h2
               className="
-                text-[13px]
-                font-bold
+                text-[17px] font-bold
                 text-black
+                sm:text-[19px]
               "
             >
               Details
@@ -717,102 +738,38 @@ export default function Submitted() {
           </div>
 
           {/* DETAILS TABLE */}
+
           <div
             className="
-              overflow-hidden
-              rounded-[11px]
+              w-full overflow-hidden
+              rounded-[12px]
               border border-[#DEDEDE]
               bg-white
             "
           >
-            {/* TYPE OF WASTE */}
-            <Row
-              label="Type of Waste"
-              value={report.waste_type}
+            {/* CNN RESULT */}
+
+            <BadgeRow
+              label="CNN Result"
+              value={cnnLabel}
+              badgeClass={getCNNStyle(
+                report.cnn_detection_level
+              )}
+              dotClass={getCNNDotStyle(
+                report.cnn_detection_level
+              )}
             />
 
-            {/* CNN RESULT */}
-            <div
-              className="
-                flex min-h-[36px]
-                items-center justify-between
-                gap-2 border-b
-                border-[#D8D8D8]
-                px-3 py-1.5
-              "
-            >
-              <span
-                className="
-                  text-[11px]
-                  text-[#858585]
-                  sm:text-xs
-                "
-              >
-                CNN Result
-              </span>
+            {/* REPORT STATUS */}
 
-              <span
-                className={`
-                  inline-flex
-                  items-center justify-center
-                  gap-1.5 rounded-full
-                  px-3 py-1
-                  text-[11px] font-bold
-                  whitespace-nowrap
-                  ${getCNNStyle(
-                    report.cnn_detection_level
-                  )}
-                `}
-              >
-                <span
-                  className={`
-                    h-[8px] w-[8px]
-                    shrink-0 rounded-full
-                    ${getCNNDotStyle(
-                      report.cnn_detection_level
-                    )}
-                  `}
-                />
+            <BadgeRow
+              label="Status"
+              value={formatStatus(status)}
+              badgeClass={getStatusStyle(status)}
+            />
 
-                {cnnLabel}
-              </span>
-            </div>
+            {/* COLLECTION DATE */}
 
-            {/* STATUS */}
-            <div
-              className="
-                flex min-h-[36px]
-                items-center justify-between
-                gap-2 border-b
-                border-[#D8D8D8]
-                px-3 py-1.5
-              "
-            >
-              <span
-                className="
-                  text-[11px]
-                  text-[#858585]
-                  sm:text-xs
-                "
-              >
-                Status
-              </span>
-
-              <span
-                className={`
-                  rounded-full
-                  px-3 py-1
-                  text-[11px]
-                  font-bold
-                  whitespace-nowrap
-                  ${getStatusStyle(status)}
-                `}
-              >
-                {formatStatus(status)}
-              </span>
-            </div>
-
-            {/* DATE COLLECTION */}
             <Row
               label="Date Collection"
               value={
@@ -822,7 +779,8 @@ export default function Submitted() {
               }
             />
 
-            {/* REPORT SUBMITTED DATE */}
+            {/* SUBMISSION DATE */}
+
             <Row
               label="Report Submitted"
               value={formatDate(

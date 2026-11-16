@@ -166,8 +166,6 @@ export default function App() {
           element={<Profile />} 
           />
       </Route>
-
-      {/* Barangay staff routes with DesktopSidebar */}
       <Route
         element={
           <RoleLayout allowedRoles={["admin"]} />
@@ -178,8 +176,6 @@ export default function App() {
           element={<AdminDashboard />}
         />
 
-
-        {/* keeps the old URL working if anything still links to it */}
         <Route
           path="/admin/AdminDashboard"
           element={<Navigate to="/admin/dashboard" replace />}
